@@ -14,6 +14,8 @@ and logs inside this folder.
 | `data_server.py` | FastAPI web app (the dashboard). Serves the pages and file downloads. |
 | `build_binance_ranking.py` | Generates the **full Binance universe** ranking (`binance_ranking.json`). |
 | `config.json` | **Tunable fee & filter thresholds** read by the ranking generator. |
+| `data/futures/` | **Bundled sample data** — 15m/1h/1d for the top-20 pairlist coins (see below). |
+| `pairs.json` | The 20 bundled coins as a pair list (default for the ranking generator). |
 | `rank_spreads.py` | Hyperliquid + Binance spread/arbitrage tool (reference). |
 | `sample_csv/` | Example CSV outputs from `rank_spreads.py`. |
 | `start_screener.sh` / `stop_screener.sh` / `status_screener.sh` | Service control. |
@@ -52,8 +54,27 @@ A local `.env` placed in this folder is loaded first, so it can hold both the to
 and any `SCREENER_*` overrides. Generated output (`binance_ranking.json`) is always
 written inside this folder.
 
-> The market data folder can be large (hundreds of MB to GB) and is **not** part of
-> this repository — point `SCREENER_DATA_DIR` at wherever the `.feather` files live.
+## Bundled data — operational out of the box
+
+The repo ships with `data/futures/` pre-loaded so a fresh clone works immediately for
+**20 assets** (the highest-volume coins in the pairlist), at **15m, 1h and 1d** (~50 MB total):
+
+| | | | | |
+|---|---|---|---|---|
+| BTC | ETH | ZEC | SOL | HYPE |
+| XRP | WLD | DOGE | BNB | 1000PEPE |
+| NEAR | ADA | SUI | ENA | XLM |
+| AVAX | BCH | LINK | FIL | BABY |
+
+*(ranked by 24h USDT volume at bundle time)*
+
+After cloning, the dashboard is live for these 20 once you (1) `pip install -r requirements.txt`,
+and (2) set `DATA_SERVER_TOKEN` (e.g. in a local `.env`). The default `SCREENER_DATA_DIR`
+is this folder's `data/futures`, so no path setup is needed.
+
+**More assets / timeframes** are downloaded on the destination machine into `data/futures/`
+(those extra files are gitignored, so they won't bloat the repo). The full pipeline that
+produced this data lives outside this repo.
 
 ## Quick start
 

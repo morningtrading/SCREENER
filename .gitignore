@@ -6,3 +6,6 @@ __pycache__/
 
 # Local machine config (token + host-specific paths)
 .env
+
+# Bundled sample data is force-added; further downloads here are ignored
+data/futures/*
