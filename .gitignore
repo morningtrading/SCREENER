@@ -1,0 +1,5 @@
+# Runtime / secrets (screener.log contains tokenized request URLs)
+screener.log
+screener.pid
+__pycache__/
+*.pyc
