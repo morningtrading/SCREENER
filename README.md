@@ -76,19 +76,37 @@ is this folder's `data/futures`, so no path setup is needed.
 (those extra files are gitignored, so they won't bloat the repo). The full pipeline that
 produced this data lives outside this repo.
 
-## Quick start
+## Quick start (fresh clone — all-inclusive)
+
+From nothing to a live dashboard for the 20 bundled assets:
 
 ```bash
-cd /path/to/SCREENER
-./menu.sh                 # interactive
-# or directly:
-./start_screener.sh       # starts on port 8000 (override: PORT=8001 ./start_screener.sh)
-./status_screener.sh
-./stop_screener.sh
+# 1. Clone
+git clone git@github.com:morningtrading/SCREENER.git
+cd SCREENER
+
+# 2. Install dependencies into a local venv
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+
+# 3. Set an access token (required; no insecure default)
+echo "DATA_SERVER_TOKEN=$(openssl rand -hex 24)" > .env
+
+# 4. Start — serves the 20 bundled coins on port 8000
+./start_screener.sh
+
+# 5. Open the dashboard (token is in your .env)
+echo "http://localhost:8000/?token=$(grep '^DATA_SERVER_TOKEN=' .env | cut -d= -f2)"
 ```
 
-All endpoints require the token (`?token=...` or `x-access-token` header),
-read from `DATA_SERVER_TOKEN`.
+Then `./status_screener.sh` to health-check, `./stop_screener.sh` to stop, or
+`./menu.sh` for an interactive control panel. Use a different port with
+`PORT=8001 ./start_screener.sh`.
+
+All endpoints require the token (`?token=...` or `x-access-token` header).
+No `data/` path setup is needed — it defaults to the bundled `data/futures/`.
+To serve a larger dataset, drop more `.feather` files into `data/futures/`
+(or point `SCREENER_DATA_DIR` elsewhere) — see **Configuration**.
 
 ## Endpoints
 
