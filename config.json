@@ -1,0 +1,10 @@
+{
+  "fees": {
+    "taker_pct": 0.04
+  },
+  "filters": {
+    "min_volume_usdt": 1000000,
+    "max_spread_pct": 0.10,
+    "min_volatility_pct": 2.0
+  }
+}

@@ -9,8 +9,8 @@ For every symbol:
   - volatility %    = 24h (high-low)/weightedAvgPrice*100   (range-based vol index)
   - quote_volume    = 24h USDT volume
 
-"Good" (tradeable) = quote_volume >= MIN_VOLUME AND 0 < spread% <= MAX_SPREAD_PCT.
-Writes user_data/binance_ranking.json for the data server to display.
+"Good" (tradeable) = volume, spread, and volatility all pass the config.json thresholds.
+Writes binance_ranking.json for the data server to display.
 """
 import os
 import json
@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
-# Portable config: defaults to the freqvwap project, overridable via env vars.
+# Locations come from env vars; the default base is set per host.
 PROJECT_ROOT = Path(os.environ.get("SCREENER_PROJECT_ROOT", "/home/titus/freqvwap"))
 PAIRS_FILE = Path(os.environ.get("SCREENER_PAIRS_FILE", str(PROJECT_ROOT / "user_data" / "pairs.json")))
 OUT_FILE = BASE / "binance_ranking.json"
@@ -27,18 +27,38 @@ OUT_FILE = BASE / "binance_ranking.json"
 FAPI = "https://fapi.binance.com/fapi/v1"
 TIMEOUT = 10
 
-# Binance USDⓈ-M futures fees (percent)
-TAKER_FEE = 0.04
-ROUNDTRIP_TAKER = TAKER_FEE * 2
+# --- Tunable parameters: loaded from config.json, NOT hardcoded. ---
+# Override the config path with SCREENER_CONFIG. Any missing key falls back to
+# the defaults below, so the tool still runs if config.json is absent.
+CONFIG_FILE = Path(os.environ.get("SCREENER_CONFIG", str(BASE / "config.json")))
+_DEFAULTS = {
+    "fees": {"taker_pct": 0.04},
+    "filters": {"min_volume_usdt": 1_000_000, "max_spread_pct": 0.10, "min_volatility_pct": 2.0},
+}
 
-# Filters for "good" coins
-MIN_VOLUME = 1_000_000      # 24h quote (USDT) volume floor
-MAX_SPREAD_PCT = 0.10       # spread must be tighter than this to be "good"
-MIN_VOLATILITY_PCT = 2.0    # 24h range must be at least this (filters stablecoins/gold/index)
+
+def load_config():
+    cfg = {section: dict(values) for section, values in _DEFAULTS.items()}
+    try:
+        with open(CONFIG_FILE) as fh:
+            user = json.load(fh)
+        for section in cfg:
+            cfg[section].update(user.get(section, {}))
+    except FileNotFoundError:
+        pass
+    return cfg
+
+
+CFG = load_config()
+TAKER_FEE = CFG["fees"]["taker_pct"]            # Binance USDⓈ-M futures taker fee (%)
+ROUNDTRIP_TAKER = TAKER_FEE * 2
+MIN_VOLUME = CFG["filters"]["min_volume_usdt"]        # 24h quote (USDT) volume floor
+MAX_SPREAD_PCT = CFG["filters"]["max_spread_pct"]     # spread must be tighter than this
+MIN_VOLATILITY_PCT = CFG["filters"]["min_volatility_pct"]  # 24h range floor (filters stablecoins/gold)
 
 
 def get_json(path):
-    req = urllib.request.Request(f"{FAPI}/{path}", headers={"User-Agent": "freqvwap-binance-rank/1.0"})
+    req = urllib.request.Request(f"{FAPI}/{path}", headers={"User-Agent": "screener-binance-rank/1.0"})
     with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
         return json.loads(r.read().decode())
 
