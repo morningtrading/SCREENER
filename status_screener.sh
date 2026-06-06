@@ -3,9 +3,11 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 PORT="${PORT:-8000}"
-ENV_FILE="${SCREENER_ENV_FILE:-/home/titus/freqvwap/.env}"
-[ -f .env ] && grep -q '^DATA_SERVER_TOKEN=' .env && ENV_FILE=".env"
+# Load local .env (token + optional SCREENER_* overrides), then resolve token source.
+[ -f .env ] && set -a && . ./.env && set +a
+ENV_FILE="${SCREENER_ENV_FILE:-.env}"
 TOKEN=$(grep '^DATA_SERVER_TOKEN=' "$ENV_FILE" 2>/dev/null | cut -d= -f2)
+[ -z "$TOKEN" ] && TOKEN="${DATA_SERVER_TOKEN:-}"
 
 echo "=== SCREENER status (port $PORT) ==="
 if pgrep -f "uvicorn data_server:app --host 0.0.0.0 --port $PORT" >/dev/null; then

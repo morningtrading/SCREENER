@@ -41,8 +41,8 @@ All external locations are environment variables. Set them in a local `.env`
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `DATA_SERVER_TOKEN` | *(required)* | Access token for all endpoints |
-| `SCREENER_PROJECT_ROOT` | *(set per host)* | Base used to derive the defaults below |
-| `SCREENER_DATA_DIR` | `$SCREENER_PROJECT_ROOT/data/futures` | Folder of `.feather` data files to serve |
+| `SCREENER_PROJECT_ROOT` | the SCREENER folder | Base used to derive the defaults below |
+| `SCREENER_DATA_DIR` | `<SCREENER>/data/futures` | Folder of `.feather` data files to serve |
 | `SCREENER_PAIRS_FILE` | `$SCREENER_PROJECT_ROOT/pairs.json` | Pair list (`{"pairs": [...]}`) for the ranking generator |
 | `SCREENER_ENV_FILE` | `$SCREENER_PROJECT_ROOT/.env` | File to read the token from |
 | `SCREENER_VENV` | `$SCREENER_PROJECT_ROOT/.venv` | Python venv for the shell scripts |
@@ -58,7 +58,7 @@ written inside this folder.
 ## Quick start
 
 ```bash
-cd /home/titus/SCREENER
+cd /path/to/SCREENER
 ./menu.sh                 # interactive
 # or directly:
 ./start_screener.sh       # starts on port 8000 (override: PORT=8001 ./start_screener.sh)

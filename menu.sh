@@ -4,12 +4,15 @@ set -uo pipefail
 cd "$(dirname "$0")"
 
 PORT="${PORT:-8000}"
-# Portable config: override via env, else fall back to the freqvwap project.
-ENV_FILE="${SCREENER_ENV_FILE:-/home/titus/freqvwap/.env}"
-[ -f .env ] && grep -q '^DATA_SERVER_TOKEN=' .env && ENV_FILE=".env"
-VENV="${SCREENER_VENV:-/home/titus/freqvwap/.venv}"
-[ -x ".venv/bin/python" ] && VENV="$(pwd)/.venv"
+# Load local .env (token + optional SCREENER_* overrides).
+[ -f .env ] && set -a && . ./.env && set +a
+ENV_FILE="${SCREENER_ENV_FILE:-.env}"
 TOKEN=$(grep '^DATA_SERVER_TOKEN=' "$ENV_FILE" 2>/dev/null | cut -d= -f2)
+[ -z "$TOKEN" ] && TOKEN="${DATA_SERVER_TOKEN:-}"
+# Python: local ./.venv, else $SCREENER_VENV, else system python3.
+if [ -x ".venv/bin/python" ]; then PY="$(pwd)/.venv/bin/python"
+elif [ -n "${SCREENER_VENV:-}" ] && [ -x "$SCREENER_VENV/bin/python" ]; then PY="$SCREENER_VENV/bin/python"
+else PY="python3"; fi
 HOST="${SCREENER_HOST:-permanent}"
 
 urls() {
@@ -36,7 +39,7 @@ while true; do
         1) ./start_screener.sh ;;
         2) ./stop_screener.sh ;;
         3) ./status_screener.sh ;;
-        4) "$VENV/bin/python" build_binance_ranking.py ;;
+        4) "$PY" build_binance_ranking.py ;;
         5) urls ;;
         6) tail -n 30 -f screener.log ;;
         0) exit 0 ;;

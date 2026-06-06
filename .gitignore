@@ -3,3 +3,6 @@ screener.log
 screener.pid
 __pycache__/
 *.pyc
+
+# Local machine config (token + host-specific paths)
+.env

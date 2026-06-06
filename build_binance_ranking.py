@@ -19,9 +19,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
-# Locations come from env vars; the default base is set per host.
-PROJECT_ROOT = Path(os.environ.get("SCREENER_PROJECT_ROOT", "/home/titus/freqvwap"))
-PAIRS_FILE = Path(os.environ.get("SCREENER_PAIRS_FILE", str(PROJECT_ROOT / "user_data" / "pairs.json")))
+# Locations come from env vars / a local .env; defaults are relative to this folder.
+PROJECT_ROOT = Path(os.environ.get("SCREENER_PROJECT_ROOT", str(BASE)))
+PAIRS_FILE = Path(os.environ.get("SCREENER_PAIRS_FILE", str(PROJECT_ROOT / "pairs.json")))
 OUT_FILE = BASE / "binance_ranking.json"
 
 FAPI = "https://fapi.binance.com/fapi/v1"

@@ -9,7 +9,7 @@ import requests
 try:
     from dotenv import load_dotenv
     import os
-    _root = os.environ.get("SCREENER_PROJECT_ROOT", "/home/titus/freqvwap")
+    _root = os.environ.get("SCREENER_PROJECT_ROOT", os.path.dirname(os.path.abspath(__file__)))
     load_dotenv(os.environ.get("SCREENER_ENV_FILE", os.path.join(_root, ".env")))
 except Exception:
     pass
