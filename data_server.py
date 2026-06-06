@@ -305,6 +305,20 @@ def coin_links(coin: str, token: str) -> str:
     """Coin name link plus an inline TradingView chart link (used where there's no Chart column)."""
     return f'{coin_link(coin, token)} {tradingview_link(coin)}'
 
+
+def asset_icon(asset_type: Optional[str]) -> str:
+    """A small badge flagging non-crypto instruments (stock / index / commodity)."""
+    icons = {
+        "stock": ("\U0001F3E2", "Stock — not a crypto"),            # 🏢
+        "index": ("\U0001F4CA", "Index — not a crypto"),            # 📊
+        "commodity": ("\U0001F6E2️", "Commodity — not a crypto"),  # 🛢️
+    }
+    ent = icons.get(asset_type or "")
+    if not ent:
+        return ""
+    icon, title = ent
+    return f' <span class="aflag" title="{title}">{icon}</span>'
+
 # --- Helper: Parse filename ---
 def parse_filename(fname: str):
     # Example: BTC_USDT_USDT-15m-futures.feather
@@ -621,7 +635,10 @@ table.dataTable a:hover{text-shadow:0 0 8px var(--neon);}
   border-bottom:1px solid rgba(0,255,255,.35);box-shadow:0 2px 8px rgba(0,0,0,.4);}
 #rank tbody td{padding:5px 12px;border-top:1px solid rgba(255,255,255,.04);}
 #rank tbody tr{transition:background .12s;}
-#rank tbody tr:hover{background:rgba(0,255,255,.09)!important;}
+#rank tbody tr.odd{background:rgba(255,255,255,.015);}
+#rank tbody tr.even{background:rgba(0,255,255,.055);}
+#rank tbody tr:hover{background:rgba(0,255,255,.12)!important;}
+.aflag{font-size:.95em;margin-left:5px;cursor:help;opacity:.9;}
 #rank td:nth-child(1),#rank th:nth-child(1){text-align:right;color:#7f8aa3;width:50px;}
 #rank td:nth-child(2){font-weight:600;}
 #rank td:nth-child(3),#rank th:nth-child(3){text-align:center;width:54px;}
@@ -937,15 +954,15 @@ async def binance_ranking(request: Request):
     for r in data.get("rows", []):
         good = r["good"]
         bg = "rgba(63,224,138,.08)" if good else "rgba(255,90,110,.05)"
-        flag = ('<span class="chip good">GOOD</span>' if good else '<span class="chip bad">no</span>')
+        flag = ('<span class="chip good">FILTER PASS</span>' if good else '<span class="chip bad">FILTER FAIL</span>')
         in_list = ('<span class="yes">&#10003;</span>' if r['in_pairlist'] else '<span class="no">&middot;</span>')
         vol = r.get("volatility_pct")
         vol_cell = f"<td data-order='{vol if vol is not None else -1}'>{vol:.2f}</td>" if vol is not None else "<td data-order='-1'>-</td>"
         qv = r["quote_volume"]
         rows_html.append(
-            f"<tr style='background:{bg}'>"
+            f"<tr>"
             f"<td>{r['rank']}</td>"
-            f"<td>{coin_link(r['coin'], token)}</td>"
+            f"<td>{coin_link(r['coin'], token)}{asset_icon(r.get('asset_type'))}</td>"
             f"<td>{tradingview_link(r['coin'])}</td>"
             f"<td>{r['spread_pct']:.4f}</td>"
             f"<td>{r['fee_roundtrip_pct']:.2f}</td>"
@@ -967,7 +984,7 @@ async def binance_ranking(request: Request):
 <h2>Full Binance Futures Ranking</h2>
 <p class="meta">All {data.get('total_symbols')} live USDⓈ-M PERPETUAL symbols, ranked by round-trip cost
 (spread % + {data.get('fees',{}).get('roundtrip_taker_pct')}% fee).
-<span class="chip good">GOOD</span> = 24h volume &ge; {data.get('min_volume'):,.0f} USDT
+<span class="chip good">FILTER PASS</span> = 24h volume &ge; {data.get('min_volume'):,.0f} USDT
 AND spread &le; {data.get('max_spread_pct')}%
 AND volatility &ge; {data.get('min_volatility_pct')}%.
 <b>{data.get('count_good')}</b> of {data.get('total_symbols')} qualify.
@@ -980,7 +997,7 @@ Volatility = 24h (high-low)/avg %.<br>Generated {data.get('generated_utc')} UTC.
 </div>
 <table id="rank" class="display" style="width:100%">
 <thead><tr><th>Rank</th><th>Coin</th><th>Chart</th><th>Spread %</th><th>Fee RT %</th><th>Total Cost %</th>
-<th>Volatility %</th><th>24h Vol</th><th>In List</th><th>Good</th></tr></thead>
+<th>Volatility %</th><th>24h Vol</th><th>In List</th><th>Filter</th></tr></thead>
 <tbody>
 {''.join(rows_html)}
 </tbody></table>
@@ -1038,14 +1055,14 @@ async def mexc_ranking(request: Request):
     for r in data.get("rows", []):
         good = r["good"]
         bg = "rgba(63,224,138,.08)" if good else "rgba(255,90,110,.05)"
-        flag = ('<span class="chip good">GOOD</span>' if good else '<span class="chip bad">no</span>')
+        flag = ('<span class="chip good">FILTER PASS</span>' if good else '<span class="chip bad">FILTER FAIL</span>')
         vol = r.get("volatility_pct")
         vol_cell = f"<td data-order='{vol if vol is not None else -1}'>{vol:.2f}</td>" if vol is not None else "<td data-order='-1'>-</td>"
         qv = r["quote_volume"]
         rows_html.append(
-            f"<tr style='background:{bg}'>"
+            f"<tr>"
             f"<td>{r['rank']}</td>"
-            f"<td>{coin_link(r['coin'], token)}</td>"
+            f"<td>{coin_link(r['coin'], token)}{asset_icon(r.get('asset_type'))}</td>"
             f"<td>{tradingview_link(r['coin'])}</td>"
             f"<td>{r['spread_pct']:.4f}</td>"
             f"<td>{r['fee_roundtrip_pct']:.2f}</td>"
@@ -1066,7 +1083,7 @@ async def mexc_ranking(request: Request):
 <h2>Full MEXC Futures Ranking</h2>
 <p class="meta">All {data.get('total_symbols')} live USDT-margined perpetuals (MEXC public API, no key),
 ranked by round-trip cost (spread % + {data.get('fees',{}).get('roundtrip_taker_pct')}% fee).
-<span class="chip good">GOOD</span> = 24h volume &ge; {data.get('min_volume'):,.0f} USDT
+<span class="chip good">FILTER PASS</span> = 24h volume &ge; {data.get('min_volume'):,.0f} USDT
 AND spread &le; {data.get('max_spread_pct')}%
 AND volatility &ge; {data.get('min_volatility_pct')}%.
 <b>{data.get('count_good')}</b> of {data.get('total_symbols')} qualify.
@@ -1079,7 +1096,7 @@ Coin links go to the Binance data summary (backtest CSVs).<br>Generated {data.ge
 </div>
 <table id="rank" class="display" style="width:100%">
 <thead><tr><th>Rank</th><th>Coin</th><th>Chart</th><th>Spread %</th><th>Fee RT %</th><th>Total Cost %</th>
-<th>Volatility %</th><th>24h Vol</th><th>Good</th></tr></thead>
+<th>Volatility %</th><th>24h Vol</th><th>Filter</th></tr></thead>
 <tbody>
 {''.join(rows_html)}
 </tbody></table>
@@ -1135,7 +1152,7 @@ async def combined(request: Request):
         coin = r["coin"]
         good = r["good"]
         bg = "rgba(63,224,138,.08)" if good else "rgba(255,90,110,.05)"
-        flag = ('<span class="chip good">GOOD</span>' if good else '<span class="chip bad">no</span>')
+        flag = ('<span class="chip good">FILTER PASS</span>' if good else '<span class="chip bad">FILTER FAIL</span>')
         vol = r.get("volatility_pct")
         vol_cell = f"<td data-order='{vol if vol is not None else -1}'>{vol:.2f}</td>" if vol is not None else "<td data-order='-1'>-</td>"
         qv = r["quote_volume"]
@@ -1149,9 +1166,9 @@ async def combined(request: Request):
             bt = '<span class="no">&mdash;</span>'
             bt_order = 0
         rows_html.append(
-            f"<tr style='background:{bg}'>"
+            f"<tr>"
             f"<td>{r['rank']}</td>"
-            f"<td>{coin_link(coin, token)}</td>"
+            f"<td>{coin_link(coin, token)}{asset_icon(r.get('asset_type'))}</td>"
             f"<td>{tradingview_link(coin)}</td>"
             f"<td>{r['spread_pct']:.4f}</td>"
             f"{vol_cell}"
@@ -1173,7 +1190,7 @@ async def combined(request: Request):
 {auth_status_html(request)}
 <h2>Combined ranking — MEXC selection &middot; Binance backtest data</h2>
 <p class="meta">Ranked by <b>MEXC</b> round-trip cost (spread % + {mexc_fee}% fee) — the exchange you trade on.
-<span class="chip good">GOOD</span> reflects MEXC volume/spread/volatility thresholds.
+<span class="chip good">FILTER PASS</span> reflects MEXC volume/spread/volatility thresholds.
 The <b>Binance Cost %</b> column and the <b>Backtest</b> CSV link are for historical data only
 (downloads come from the bundled Binance feather files).<br>
 {mexc.get('total_symbols')} MEXC symbols &middot; {mexc.get('count_good')} good &middot; generated {mexc.get('generated_utc')} UTC.</p>
@@ -1185,7 +1202,7 @@ The <b>Binance Cost %</b> column and the <b>Backtest</b> CSV link are for histor
 </div>
 <table id="rank" class="display" style="width:100%">
 <thead><tr><th>Rank</th><th>Coin</th><th>Chart</th><th>MEXC Spread %</th><th>MEXC Vol %</th>
-<th>MEXC 24h Vol</th><th>MEXC Cost %</th><th>Binance Cost %</th><th>MEXC Good</th><th>Backtest</th></tr></thead>
+<th>MEXC 24h Vol</th><th>MEXC Cost %</th><th>Binance Cost %</th><th>MEXC Filter</th><th>Backtest</th></tr></thead>
 <tbody>
 {''.join(rows_html)}
 </tbody></table>

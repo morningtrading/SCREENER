@@ -174,7 +174,7 @@ The fee and "good"-coin thresholds are **not in code** — they live in `config.
 > default of 0.02% — set it to your actual MEXC tier). The same `filters` thresholds
 > apply to both exchanges.
 
-A coin is flagged **GOOD** (green) when **all** hold:
+A coin is flagged **FILTER PASS** when **all** hold (otherwise **FILTER FAIL**):
 - 24h quote volume ≥ `min_volume_usdt`
 - bid/ask spread ≤ `max_spread_pct`
 - 24h volatility (range) ≥ `min_volatility_pct`

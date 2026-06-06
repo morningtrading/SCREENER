@@ -63,10 +63,23 @@ def get_json(url):
         return json.loads(r.read().decode())
 
 
+def classify(concept):
+    """Map a contract's conceptPlate tags to an asset class (crypto/stock/index/commodity)."""
+    j = " ".join(t.lower() for t in (concept or []))
+    if "stockindex" in j:
+        return "index"
+    if "stock" in j:
+        return "stock"
+    if any(k in j for k in ("commodit", "metal", "oil", "tradfi")):
+        return "commodity"
+    return "crypto"
+
+
 def main():
-    # 1. Universe: USDT-quoted, USDT-settled perpetuals
+    # 1. Universe: USDT-quoted, USDT-settled perpetuals, with an asset-class tag.
     detail = get_json(DETAIL_URL).get("data", [])
-    usdt = {c["symbol"] for c in detail
+    usdt = {c["symbol"]: classify(c.get("conceptPlate"))
+            for c in detail
             if c.get("quoteCoin") == "USDT" and c.get("settleCoin") == "USDT"}
 
     # 2. Bulk ticker: bid/ask + 24h turnover + 24h range for all contracts (one call)
@@ -83,6 +96,7 @@ def main():
         sym = t.get("symbol")
         if sym not in usdt:
             continue
+        asset_type = usdt[sym]
         try:
             bid = float(t["bid1"]); ask = float(t["ask1"])
             high = float(t["high24Price"]); low = float(t["lower24Price"])
@@ -115,6 +129,7 @@ def main():
             "quote_volume": round(amt, 0),
             "good": good,
             "in_pairlist": coin in pairlist,
+            "asset_type": asset_type,
         })
 
     rows.sort(key=lambda r: r["total_cost_pct"])
