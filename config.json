@@ -1,6 +1,7 @@
 {
   "fees": {
-    "taker_pct": 0.04
+    "taker_pct": 0.04,
+    "mexc_taker_pct": 0.02
   },
   "filters": {
     "min_volume_usdt": 1000000,

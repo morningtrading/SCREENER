@@ -13,7 +13,8 @@ and logs inside this folder.
 |------|---------|
 | `data_server.py` | FastAPI web app (the dashboard). Serves the pages and file downloads. |
 | `build_binance_ranking.py` | Generates the **full Binance universe** ranking (`binance_ranking.json`). |
-| `config.json` | **Tunable fee & filter thresholds** read by the ranking generator. |
+| `build_mexc_ranking.py` | Generates the **full MEXC universe** ranking (`mexc_ranking.json`) — public API, no key. |
+| `config.json` | **Tunable fee & filter thresholds** read by the ranking generators. |
 | `data/futures/` | **Bundled sample data** — 15m/1h/1d for the top-20 pairlist coins (see below). |
 | `pairs.json` | The 20 bundled coins as a pair list (default for the ranking generator). |
 | `rank_spreads.py` | Hyperliquid + Binance spread/arbitrage tool (reference). |
@@ -42,7 +43,11 @@ All external locations are environment variables. Set them in a local `.env`
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `DATA_SERVER_TOKEN` | *(required)* | Access token for all endpoints |
+| `DATA_SERVER_TOKEN` | *(required)* | Access token / API key for all endpoints |
+| `SCREENER_USER` | `admin` | Username for the login page & HTTP Basic auth |
+| `SCREENER_PASSWORD` | falls back to `DATA_SERVER_TOKEN` | Password for the login page & HTTP Basic auth |
+| `SCREENER_SECRET_KEY` | derived from the token | Secret used to sign the session cookie |
+| `SCREENER_SESSION_MAX_AGE` | `604800` (7 days) | Session cookie lifetime, in seconds |
 | `SCREENER_PROJECT_ROOT` | the SCREENER folder | Base used to derive the defaults below |
 | `SCREENER_DATA_DIR` | `<SCREENER>/data/futures` | Folder of `.feather` data files to serve |
 | `SCREENER_PAIRS_FILE` | `$SCREENER_PROJECT_ROOT/pairs.json` | Pair list (`{"pairs": [...]}`) for the ranking generator |
@@ -103,10 +108,29 @@ Then `./status_screener.sh` to health-check, `./stop_screener.sh` to stop, or
 `./menu.sh` for an interactive control panel. Use a different port with
 `PORT=8001 ./start_screener.sh`.
 
-All endpoints require the token (`?token=...` or `x-access-token` header).
 No `data/` path setup is needed — it defaults to the bundled `data/futures/`.
 To serve a larger dataset, drop more `.feather` files into `data/futures/`
 (or point `SCREENER_DATA_DIR` elsewhere) — see **Configuration**.
+
+## Authentication
+
+Every endpoint is protected. Any **one** of these grants access:
+
+1. **Session login (browser)** — visit any page and you're redirected to a `/login`
+   screen. Sign in with `SCREENER_USER` / `SCREENER_PASSWORD` (defaults: `admin` and
+   your `DATA_SERVER_TOKEN`). A signed cookie then keeps you logged in for
+   `SCREENER_SESSION_MAX_AGE` (7 days by default). Log out via `/logout`.
+2. **HTTP Basic auth** — send `Authorization: Basic <base64(user:password)>`. Handy for
+   scripts and for browsers that prefer the native prompt:
+   `curl -u admin:$TOKEN http://host:8000/summary.json`
+3. **Access token** — `?token=...` query param or `x-access-token` header, as before:
+   `curl -H "x-access-token: $TOKEN" http://host:8000/summary.json`
+
+Browsers should use the login page (the token no longer needs to ride along in URLs
+once you have a session). Scripts can keep using the token or Basic auth.
+
+> Put the server behind HTTPS (or a TLS-terminating reverse proxy) for real use, and
+> set `https_only=True` on the session cookie in `data_server.py`.
 
 ## Endpoints
 
@@ -116,7 +140,9 @@ To serve a larger dataset, drop more `.feather` files into `data/futures/`
 | `/summary` | File table (per coin/timeframe), feather + CSV download, TradingView links |
 | `/summary.json` | Machine-readable file summary (`?showmeasset=BNB` filter) |
 | `/binance-ranking` | **Every** Binance perpetual ranked; filtered by volume, spread, volatility; green = tradeable |
-| `/binance-good-pairs.json` | The "good" coins as a JSON pair list (download candidates) |
+| `/mexc-ranking` | Same ranking for **MEXC** futures (public API, no key); coin names link to Binance data |
+| `/combined` | **Trade-on-MEXC** selection view + Binance backtest-data (CSV) links side by side |
+| `/binance-good-pairs.json` / `/mexc-good-pairs.json` | The "good" coins as a JSON pair list (download candidates) |
 | `/file/{name}` | Download a raw `.feather` file |
 | `/csv/{name}` | Download a `.feather` file converted to CSV on the fly |
 
@@ -126,6 +152,7 @@ The ranking is a snapshot. Regenerate any time (menu option 4, or):
 
 ```bash
 .venv/bin/python build_binance_ranking.py   # full Binance universe
+.venv/bin/python build_mexc_ranking.py       # full MEXC universe (public API, no key)
 ```
 
 ### Filter parameters — `config.json`
@@ -134,7 +161,7 @@ The fee and "good"-coin thresholds are **not in code** — they live in `config.
 
 ```json
 {
-  "fees":    { "taker_pct": 0.04 },
+  "fees":    { "taker_pct": 0.04, "mexc_taker_pct": 0.02 },
   "filters": {
     "min_volume_usdt":    1000000,
     "max_spread_pct":     0.10,
@@ -142,6 +169,10 @@ The fee and "good"-coin thresholds are **not in code** — they live in `config.
   }
 }
 ```
+
+> `taker_pct` is the Binance futures taker fee; `mexc_taker_pct` is MEXC's (a placeholder
+> default of 0.02% — set it to your actual MEXC tier). The same `filters` thresholds
+> apply to both exchanges.
 
 A coin is flagged **GOOD** (green) when **all** hold:
 - 24h quote volume ≥ `min_volume_usdt`

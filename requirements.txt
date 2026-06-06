@@ -4,3 +4,5 @@ pandas
 pyarrow
 python-dotenv
 requests
+itsdangerous
+python-multipart
