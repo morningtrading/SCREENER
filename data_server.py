@@ -15,10 +15,15 @@ from datetime import datetime
 from urllib.parse import quote_plus
 from dotenv import load_dotenv
 
-# Load credentials from .env (located alongside this file)
-load_dotenv(Path("/home/titus/freqvwap/.env"))
-
-DATA_DIR = Path("/home/titus/freqvwap/user_data/data/futures")
+# --- Configuration (portable via env vars; defaults to the freqvwap project) ---
+HERE = Path(__file__).resolve().parent
+# An optional .env in this folder can set SCREENER_* config vars and/or the token.
+load_dotenv(HERE / ".env")
+PROJECT_ROOT = Path(os.environ.get("SCREENER_PROJECT_ROOT", "/home/titus/freqvwap"))
+DATA_DIR = Path(os.environ.get("SCREENER_DATA_DIR", str(PROJECT_ROOT / "user_data" / "data" / "futures")))
+ENV_FILE = Path(os.environ.get("SCREENER_ENV_FILE", str(PROJECT_ROOT / ".env")))
+# Token may come from the local .env above or from the configured project .env.
+load_dotenv(ENV_FILE)
 
 # Access token is required; no insecure default. Set DATA_SERVER_TOKEN in .env.
 TOKEN = os.getenv("DATA_SERVER_TOKEN")

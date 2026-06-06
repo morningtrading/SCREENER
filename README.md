@@ -22,14 +22,35 @@ generated output (`binance_ranking.json`) and logs inside this folder.
 
 ## Requirements
 
-Uses the parent project's virtualenv at `/home/titus/freqvwap/.venv`
-(FastAPI, uvicorn, pandas, python-dotenv). No separate install needed.
+Python 3.10+. Either reuse an existing venv or create a local one:
 
-## Paths it depends on (canonical project)
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
 
-- **Market data:** `/home/titus/freqvwap/user_data/data/futures/*.feather`
-- **Pairlist:** `/home/titus/freqvwap/user_data/pairs.json`
-- **Access token:** `DATA_SERVER_TOKEN` in `/home/titus/freqvwap/.env`
+The shell scripts auto-prefer a local `./.venv` if present, otherwise fall back to
+`$SCREENER_VENV`, otherwise `/home/titus/freqvwap/.venv`.
+
+## Configuration (portable)
+
+All external paths are environment variables with sensible defaults (the original
+`freqvwap` host). Override any of them — e.g. in a local `.env` (see `.env.example`)
+or your shell — to run the dashboard against data anywhere:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `DATA_SERVER_TOKEN` | *(required)* | Access token for all endpoints |
+| `SCREENER_PROJECT_ROOT` | `/home/titus/freqvwap` | Base for the defaults below |
+| `SCREENER_DATA_DIR` | `$PROJECT_ROOT/user_data/data/futures` | Folder of `.feather` data files |
+| `SCREENER_PAIRS_FILE` | `$PROJECT_ROOT/user_data/pairs.json` | Pairlist for the ranking generator |
+| `SCREENER_ENV_FILE` | `$PROJECT_ROOT/.env` | Where to read the token from |
+| `SCREENER_VENV` | `$PROJECT_ROOT/.venv` | Python venv for the shell scripts |
+| `SCREENER_HOST` | `permanent` | Hostname shown in menu URLs |
+
+A local `.env` placed in this folder is loaded first, so it can hold both the token
+and any `SCREENER_*` overrides. Generated output (`binance_ranking.json`) is always
+written inside this folder.
 
 ## Quick start
 

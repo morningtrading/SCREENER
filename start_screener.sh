@@ -4,7 +4,9 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-VENV=/home/titus/freqvwap/.venv
+# Portable: prefer a local .venv, else $SCREENER_VENV, else the freqvwap project venv.
+VENV="${SCREENER_VENV:-/home/titus/freqvwap/.venv}"
+[ -x ".venv/bin/uvicorn" ] && VENV="$(pwd)/.venv"
 PORT="${PORT:-8000}"
 
 if [ ! -x "$VENV/bin/uvicorn" ]; then

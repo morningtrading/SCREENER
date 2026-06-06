@@ -4,10 +4,13 @@ set -uo pipefail
 cd "$(dirname "$0")"
 
 PORT="${PORT:-8000}"
-ENV_FILE=/home/titus/freqvwap/.env
-VENV=/home/titus/freqvwap/.venv
+# Portable config: override via env, else fall back to the freqvwap project.
+ENV_FILE="${SCREENER_ENV_FILE:-/home/titus/freqvwap/.env}"
+[ -f .env ] && grep -q '^DATA_SERVER_TOKEN=' .env && ENV_FILE=".env"
+VENV="${SCREENER_VENV:-/home/titus/freqvwap/.venv}"
+[ -x ".venv/bin/python" ] && VENV="$(pwd)/.venv"
 TOKEN=$(grep '^DATA_SERVER_TOKEN=' "$ENV_FILE" 2>/dev/null | cut -d= -f2)
-HOST="permanent"
+HOST="${SCREENER_HOST:-permanent}"
 
 urls() {
     echo "  Landing : http://$HOST:$PORT/?token=$TOKEN"

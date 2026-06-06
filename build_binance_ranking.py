@@ -12,13 +12,16 @@ For every symbol:
 "Good" (tradeable) = quote_volume >= MIN_VOLUME AND 0 < spread% <= MAX_SPREAD_PCT.
 Writes user_data/binance_ranking.json for the data server to display.
 """
+import os
 import json
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
-PAIRS_FILE = Path("/home/titus/freqvwap") / "user_data" / "pairs.json"
+# Portable config: defaults to the freqvwap project, overridable via env vars.
+PROJECT_ROOT = Path(os.environ.get("SCREENER_PROJECT_ROOT", "/home/titus/freqvwap"))
+PAIRS_FILE = Path(os.environ.get("SCREENER_PAIRS_FILE", str(PROJECT_ROOT / "user_data" / "pairs.json")))
 OUT_FILE = BASE / "binance_ranking.json"
 
 FAPI = "https://fapi.binance.com/fapi/v1"
