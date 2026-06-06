@@ -9,3 +9,6 @@ __pycache__/
 
 # Bundled sample data is force-added; further downloads here are ignored
 data/futures/*
+
+# Agent worktrees / local tooling
+.claude/
