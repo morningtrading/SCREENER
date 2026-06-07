@@ -196,13 +196,17 @@ already pumped and are rolling over:
 
 It (1) scrapes **CoinMarketCap's trending list** (the candidate set the market is watching),
 (2) pulls **1h, 2h and 4h** candles from Binance for each coin (USDⓈ-M futures, falling back
-to spot), and (3) scores momentum with a **strong weight on 1h**. A coin is flagged
-**UPTREND** (green on `/momentum`) only when it is a genuine advance, *not a post-pump top*:
+to spot), and (3) scores momentum with a **strong weight on 1h**. The score also blends in
+very-recent action: a small **recent bucket** (length-weighted 5/15/30/45m drift, `weights.recent`)
+and a **5–15m acceleration** term (`accel_weight`) that rewards a freshening move and penalises a
+fading one inside a confirmed uptrend. A coin is flagged **UPTREND** (green on `/momentum`) only
+when it is a genuine advance, *not a post-pump top*:
 
 - composite score ≥ `min_score`, and 1h is still rising;
 - **not overextended** — 1h price ≤ `max_extension_pct` above its EMA (a blown-off top is rejected);
 - **no single-bar spike** — the last 1h candle moved ≤ `max_single_bar_pct` (rejects one vertical candle);
-- the **4h trend confirms** the move (`require_uptrend_alignment`) so a 1h blip alone doesn't qualify.
+- the **4h trend confirms** the move (`require_uptrend_alignment`) so a 1h blip alone doesn't qualify;
+- **no recent dump** — rejected if the last 15m fell more than `max_recent_drop_pct` (catching a coin rolling over).
 
 ### Momentum parameters — `config.json` (`"momentum"`)
 
@@ -211,7 +215,9 @@ All weights and thresholds are config, not code:
 ```json
 "momentum": {
   "timeframes": ["1h", "2h", "4h"],
-  "weights": { "1h": 0.5, "2h": 0.3, "4h": 0.2 },
+  "weights": { "1h": 0.5, "2h": 0.3, "4h": 0.2, "recent": 0.12 },
+  "accel_weight": 0.2,
+  "max_recent_drop_pct": 1.5,
   "roc_lookback_bars": 6,
   "ema_fast": 9, "ema_slow": 21, "slope_bars": 3,
   "klines_limit": 60,
@@ -221,7 +227,9 @@ All weights and thresholds are config, not code:
   "min_score": 1.0,
   "require_uptrend_alignment": true,
   "spot_fallback": true,
-  "candidate_limit": 30
+  "candidate_limit": 30,
+  "snapshot_keep": 300,
+  "recent_windows_min": [5, 15, 30, 45]
 }
 ```
 

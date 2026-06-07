@@ -10,7 +10,9 @@
   },
   "momentum": {
     "timeframes": ["1h", "2h", "4h"],
-    "weights": { "1h": 0.5, "2h": 0.3, "4h": 0.2 },
+    "weights": { "1h": 0.5, "2h": 0.3, "4h": 0.2, "recent": 0.12 },
+    "accel_weight": 0.2,
+    "max_recent_drop_pct": 1.5,
     "roc_lookback_bars": 6,
     "ema_fast": 9,
     "ema_slow": 21,

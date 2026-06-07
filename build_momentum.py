@@ -43,7 +43,9 @@ CONFIG_FILE = Path(os.environ.get("SCREENER_CONFIG", str(BASE / "config.json")))
 _DEFAULTS = {
     "momentum": {
         "timeframes": ["1h", "2h", "4h"],
-        "weights": {"1h": 0.5, "2h": 0.3, "4h": 0.2},  # strong weight on 1h
+        "weights": {"1h": 0.5, "2h": 0.3, "4h": 0.2, "recent": 0.12},  # strong 1h; small recent bucket
+        "accel_weight": 0.2,           # bonus/penalty for 5-15m pace within a confirmed 4h uptrend
+        "max_recent_drop_pct": 1.5,    # veto: reject if the last 15m dumped more than this (post-pump)
         "roc_lookback_bars": 6,        # rate-of-change lookback (bars)
         "ema_fast": 9,
         "ema_slow": 21,
@@ -243,8 +245,31 @@ def recent_changes(base, market, cfg):
     return out
 
 
-def score_coin(base, market, cfg):
-    """Fetch all timeframes for a coin and compute composite score + momentum verdict."""
+def recent_momentum(recent):
+    """Length-weighted recent drift (%): longer windows dominate so a lone 5m blip can't.
+
+    e.g. {"5m":.., "15m":.., "30m":.., "45m":..} -> single %-like number, or None if empty.
+    """
+    if not recent:
+        return None
+    num = den = 0.0
+    for k, v in recent.items():
+        if v is None:
+            continue
+        w = float(int(k.rstrip("m")))      # weight by window length in minutes
+        num += w * v
+        den += w
+    return num / den if den else None
+
+
+def score_coin(base, market, cfg, recent=None):
+    """Fetch all timeframes for a coin and compute composite score + momentum verdict.
+
+    The 5/15/30/45m `recent` strip feeds the score three ways (all config-driven):
+      1. a small weighted "recent" bucket in the composite (weights.recent);
+      2. an acceleration bonus/penalty within a confirmed uptrend (accel_weight);
+      3. a veto that rejects a coin whose last 15m dumped (max_recent_drop_pct).
+    """
     tfs = cfg["timeframes"]
     weights = cfg["weights"]
     per_tf = {}
@@ -255,13 +280,34 @@ def score_coin(base, market, cfg):
     if any(per_tf[tf] is None for tf in tfs):
         return None  # incomplete data — treat as unscored
 
-    wsum = sum(weights.get(tf, 0.0) for tf in tfs) or 1.0
-    score = sum(weights.get(tf, 0.0) * tf_score(per_tf[tf], cfg) for tf in tfs) / wsum
+    trend_4h = per_tf.get("4h", {}).get("trend_up", False)
+
+    # Weighted composite over 1h/2h/4h ...
+    bucket_w = {tf: weights.get(tf, 0.0) for tf in tfs}
+    bucket_v = {tf: tf_score(per_tf[tf], cfg) for tf in tfs}
+    # (1) ... plus a small "recent" bucket (length-weighted recent drift).
+    rec_mom = recent_momentum(recent)
+    rec_w = weights.get("recent", 0.0)
+    if rec_w and rec_mom is not None:
+        bucket_w["recent"] = rec_w
+        bucket_v["recent"] = rec_mom
+    wsum = sum(bucket_w.values()) or 1.0
+    score = sum(bucket_w[k] * bucket_v[k] for k in bucket_w) / wsum
+
+    # (2) Acceleration: inside a confirmed 4h uptrend, reward rising / penalise fading 5–15m pace.
+    accel = 0.0
+    if trend_4h and recent:
+        r5, r15 = recent.get("5m"), recent.get("15m")
+        pace = [x for x in (r5, r15) if x is not None]
+        if pace:
+            accel = sum(pace) / len(pace)
+    score += cfg.get("accel_weight", 0.0) * accel
 
     ext_1h = per_tf.get("1h", {}).get("extension", 0.0)
     last_1h = per_tf.get("1h", {}).get("last_bar", 0.0)
     roc_1h = per_tf.get("1h", {}).get("roc", 0.0)
-    trend_4h = per_tf.get("4h", {}).get("trend_up", False)
+    r15 = (recent or {}).get("15m")
+    max_drop = cfg.get("max_recent_drop_pct", 0.0)
 
     # Post-pump guard: flag as momentum only if a real, confirmed, non-overextended uptrend.
     reason = ""
@@ -275,6 +321,8 @@ def score_coin(base, market, cfg):
         reason = f"single-bar spike (1h {last_1h:.1f}%)"
     elif cfg["require_uptrend_alignment"] and not trend_4h:
         reason = "4h trend not up"
+    elif max_drop and r15 is not None and r15 < -max_drop:   # (3) recent dump veto
+        reason = f"recent 15m dump ({r15:.1f}%)"
     momentum = reason == ""
 
     return {
@@ -283,6 +331,7 @@ def score_coin(base, market, cfg):
         "reason": reason,
         "extension_1h": round(ext_1h, 2),
         "last_bar_1h": round(last_1h, 2),
+        "recent_mom": round(rec_mom, 3) if rec_mom is not None else None,
         "roc": {tf: round(per_tf[tf]["roc"], 2) for tf in tfs},
         "trend": {tf: per_tf[tf]["trend_up"] for tf in tfs},
     }
@@ -358,12 +407,13 @@ def main():
             "recent": {},
         }
         if market != "none":
-            res = score_coin(base, market, CFG)
+            rec = recent_changes(base, market, CFG)
+            row["recent"] = rec
+            res = score_coin(base, market, CFG, rec)
             if res is None:
                 row["reason"] = "no/short candles"
             else:
                 row.update(res)
-            row["recent"] = recent_changes(base, market, CFG)
         else:
             row["reason"] = "no Binance market"
         rows.append(row)

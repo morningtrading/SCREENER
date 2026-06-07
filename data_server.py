@@ -1272,10 +1272,12 @@ async def momentum_page(request: Request):
 {auth_status_html(request)}
 <h2>Momentum — trending coins in a real uptrend</h2>
 <p class="meta">CoinMarketCap's {data.get('total')} trending coins, scored on Binance
-<b>1h/2h/4h</b> candles (weights {w.get('1h')}/{w.get('2h')}/{w.get('4h')} — strong on 1h).
+<b>1h/2h/4h</b> candles (weights {w.get('1h')}/{w.get('2h')}/{w.get('4h')}, strong on 1h)
+plus a small recent bucket ({w.get('recent')}) and a 5–15m acceleration term.
 <span class="chip good">UPTREND</span> = composite score &ge; {cfg.get('min_score')}, 1h rising,
 NOT overextended (1h &le; {cfg.get('max_extension_pct')}% above its EMA{cfg.get('ema_slow')}),
-no single-bar spike (&le; {cfg.get('max_single_bar_pct')}%), and 4h trend confirms — i.e.
+no single-bar spike (&le; {cfg.get('max_single_bar_pct')}%), 4h trend confirms, and
+no recent 15m dump (&gt; {cfg.get('max_recent_drop_pct')}%) — i.e.
 a genuine climb, <b>not a post-pump</b> top. <b>{data.get('count_momentum')}</b> qualify now.
 Ext% = how far 1h price sits above its mean (high = stretched).
 Exchanges = listed on <span class="exch b">B</span>inance / <span class="exch m">M</span>EXC /
