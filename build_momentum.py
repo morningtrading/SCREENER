@@ -321,6 +321,22 @@ def recent_changes(base, market, cfg):
     return {"windows": win, "buy_ratio": buy_ratio, "rvol": rvol}
 
 
+def btc_regime(cfg):
+    """BTC % change across the same windows the page uses (5/15/30/45m + 1h/2h/4h ROC).
+
+    Pure context for the regime banner — green/red/white dots, info only.
+    """
+    out = {}
+    out.update(recent_changes("BTC", "futures", cfg).get("windows", {}))
+    for tf in cfg["timeframes"]:
+        kl = fetch_klines("BTC", "futures", tf, cfg["klines_limit"])
+        m = tf_metrics(kl, cfg) if kl else None
+        if m:
+            out[tf] = round(m["roc"], 3)
+            out[f"{tf}_up"] = bool(m["trend_up"])
+    return out
+
+
 def recent_momentum(recent):
     """Length-weighted recent drift (%): longer windows dominate so a lone 5m blip can't.
 
@@ -569,6 +585,7 @@ def main():
         "generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "source": source,
         "config": CFG,
+        "btc": btc_regime(CFG),
         "total": len(rows),
         "count_momentum": sum(1 for r in rows if r["momentum"]),
         "rows": rows,

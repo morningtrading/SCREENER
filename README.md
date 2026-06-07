@@ -225,6 +225,10 @@ A coin can be **EARLY** without being **UPTREND** yet — that's the point: the 
 before the 1h/2h/4h composite fully confirms. Pulled from the same candles (taker-buy/volume are in
 the kline payload) plus one bulk funding call and one open-interest call per coin.
 
+A **BTC regime banner** sits above the table — a dot strip of BTC's move across the same windows
+(5/15/30/45m + 1h/2h/4h) with a Risk-on / Risk-off / Mixed label. It's **context only** (not a
+filter), so you can read each coin's signal against the broader market.
+
 ### Momentum parameters — `config.json` (`"momentum"`)
 
 All weights and thresholds are config, not code:

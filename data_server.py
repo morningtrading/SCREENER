@@ -673,6 +673,18 @@ td.down{color:#ff7a93;}
 /* early-signal badges */
 .sig{display:inline-block;padding:1px 5px;margin:1px;border-radius:4px;font-size:9.5px;font-weight:700;
   letter-spacing:.3px;color:#9fe7ff;border:1px solid rgba(0,255,255,.42);background:rgba(0,255,255,.08);}
+/* BTC market-regime banner (info only) */
+.btcbar{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:0 0 16px;padding:9px 15px;border-radius:12px;
+  background:linear-gradient(90deg,rgba(243,186,47,.07),rgba(0,255,255,.04));border:1px solid rgba(243,186,47,.28);}
+.btctitle{font-weight:800;letter-spacing:1.5px;color:#f3ba2f;text-shadow:0 0 9px rgba(243,186,47,.45);}
+.btcdot{display:inline-flex;flex-direction:column;align-items:center;gap:3px;min-width:30px;}
+.btclab{font-size:9px;color:#8a91a3;letter-spacing:.3px;}
+.btcsep{width:1px;height:24px;background:rgba(255,255,255,.14);margin:0 3px;}
+.btcregime{font-weight:700;font-size:12px;padding:2px 11px;border-radius:999px;border:1px solid;}
+.btcregime.up{color:#3fe08a;border-color:rgba(63,224,138,.55);background:rgba(63,224,138,.1);}
+.btcregime.down{color:#ff7a93;border-color:rgba(255,90,110,.5);background:rgba(255,90,110,.07);}
+.btcregime.mixed{color:#bdfdff;border-color:rgba(0,255,255,.4);}
+.btcnote{font-size:10.5px;color:#7d8499;margin-left:auto;}
 /* auth-status pill */
 .authpill{display:inline-block;margin:8px 0 16px;padding:7px 14px;border-radius:999px;font-size:12.5px;
   background:rgba(0,255,255,.06);border:1px solid rgba(0,255,255,.28);color:#cfefff;}
@@ -1224,6 +1236,41 @@ def _early_cell(r) -> str:
     return f"<td data-order='{len(sigs)}'>{chip}{badges}</td>"
 
 
+def _btc_dot(v) -> str:
+    if v is None:
+        return '<span class="dot w s"></span>'
+    a = abs(v)
+    color = "w" if a < 0.1 else ("g" if v > 0 else "r")
+    size = "s" if (color == "w" or a < 0.3) else ("m" if a < 1.0 else "l")
+    return f'<span class="dot {color} {size}" title="{v:+.2f}%"></span>'
+
+
+def _btc_banner(btc) -> str:
+    """A dot strip for BTC across the same windows (5/15/30/45m + 1h/2h/4h) — market-regime context."""
+    if not btc:
+        return ""
+    intraday = ["5m", "15m", "30m", "45m"]
+    tfs = ["1h", "2h", "4h"]
+
+    def cell(k):
+        return f'<span class="btcdot">{_btc_dot(btc.get(k))}<span class="btclab">{k}</span></span>'
+
+    longs = [btc.get(t) for t in tfs if btc.get(t) is not None]
+    pos = sum(1 for x in longs if x > 0)
+    neg = sum(1 for x in longs if x < 0)
+    if longs and pos == len(longs):
+        rcls, rtxt = "up", "Risk-on &#9650;"
+    elif longs and neg == len(longs):
+        rcls, rtxt = "down", "Risk-off &#9660;"
+    else:
+        rcls, rtxt = "mixed", "Mixed / chop"
+    return (f'<div class="btcbar"><span class="btctitle">BTC</span>'
+            f'<span class="btcregime {rcls}">{rtxt}</span>'
+            f'{"".join(cell(k) for k in intraday)}<span class="btcsep"></span>'
+            f'{"".join(cell(k) for k in tfs)}'
+            f'<span class="btcnote">market regime &middot; for context only</span></div>')
+
+
 def _gen_epoch(iso) -> Optional[float]:
     """Parse a 'YYYY-MM-DDThh:mm:ssZ' UTC string to an epoch (seconds); None if unparseable."""
     try:
@@ -1335,6 +1382,7 @@ flags confluence — <span class="sig">BUY</span><span class="sig">VOL</span> de
 <span class="chip good">EARLY</span> = {cfg.get('early_min_signals')}+ fired (hover each for the value).<br>
 Source {data.get('source')} · generated {gen} UTC · <b id="dataage">{age_txt}</b> min old
 <span class="muted">(auto-refreshes every 5 min)</span>.</p>
+{_btc_banner(data.get("btc"))}
 <div class="searchbar">
   <span class="sicon">&#128269;</span>
   <input id="momentumsearch" type="search" placeholder="Search coin, rank or value…" autocomplete="off" autofocus>
