@@ -653,6 +653,14 @@ table.dataTable a:hover{text-shadow:0 0 8px var(--neon);}
 .chip.bad{color:#ff7a93;border-color:rgba(255,90,110,.4);background:rgba(255,90,110,.08);}
 .yes{color:#3fe08a;font-weight:700;text-shadow:0 0 8px rgba(63,224,138,.45);}
 .no{color:#39414f;}
+/* momentum cells */
+td.up{color:#3fe08a;font-weight:600;}
+td.down{color:#ff7a93;}
+#rank td .muted{color:#7d8499;font-weight:600;}
+.exch{display:inline-block;padding:1px 6px;margin:0 1px;border-radius:5px;font-size:10px;font-weight:700;letter-spacing:.3px;border:1px solid;}
+.exch.b{color:#f3ba2f;border-color:rgba(243,186,47,.55);background:rgba(243,186,47,.09);}
+.exch.m{color:#5ab0ff;border-color:rgba(90,176,255,.55);background:rgba(90,176,255,.09);}
+.exch.hl{color:#b98cff;border-color:rgba(185,140,255,.55);background:rgba(185,140,255,.09);}
 /* auth-status pill */
 .authpill{display:inline-block;margin:8px 0 16px;padding:7px 14px;border-radius:999px;font-size:12.5px;
   background:rgba(0,255,255,.06);border:1px solid rgba(0,255,255,.28);color:#cfefff;}
@@ -705,6 +713,7 @@ def nav_bar(request: Request, token: str) -> str:
         ("Binance Ranking", with_token("/binance-ranking", token), ""),
         ("MEXC Ranking", with_token("/mexc-ranking", token), ""),
         ("Combined", with_token("/combined", token), ""),
+        ("Momentum", with_token("/momentum", token), ""),
         ("Raw JSON", with_token("/summary.json", token), ""),
     ]
     if not is_readonly(request):
@@ -1124,6 +1133,147 @@ async def mexc_good_pairs(request: Request):
     data = json.loads(MEXC_RANKING_FILE.read_text())
     pairs = [f"{r['coin']}/USDT:USDT" for r in data.get("rows", []) if r.get("good")]
     return JSONResponse({"pairs": pairs, "count": len(pairs), "generated_utc": data.get("generated_utc")})
+
+
+# --- Endpoint: Momentum screener (CMC trending × Binance 1h/2h/4h) ---
+MOMENTUM_FILE = Path(__file__).resolve().parent / "momentum_ranking.json"
+
+
+def _trend_pill(up) -> str:
+    if up is True:
+        return '<span class="yes">&#9650;</span>'
+    if up is False:
+        return '<span class="no">&#9660;</span>'
+    return '<span class="no">&middot;</span>'
+
+
+def _exch_badges(exchanges) -> str:
+    """B / M / HL badges for the exchanges a coin is listed on (Binance, MEXC, Hyperliquid)."""
+    labels = {"binance": ("b", "B", "Binance"), "mexc": ("m", "M", "MEXC"), "hl": ("hl", "HL", "Hyperliquid")}
+    have = exchanges or []
+    parts = [f'<span class="exch {c}" title="{name}">{txt}</span>'
+             for key, (c, txt, name) in labels.items() if key in have]
+    return "".join(parts) if parts else '<span class="no">&mdash;</span>'
+
+
+def _roc_cell(val) -> str:
+    if val is None:
+        return "<td data-order='-1e9'>-</td>"
+    cls = "up" if val > 0 else ("down" if val < 0 else "")
+    return f"<td data-order='{val}' class='{cls}'>{val:+.1f}</td>"
+
+
+@app.get("/momentum", response_class=HTMLResponse)
+async def momentum_page(request: Request):
+    if not is_authenticated(request):
+        return login_redirect(request)
+    token = link_token(request)
+    home = with_token("/", token)
+    if not MOMENTUM_FILE.exists():
+        return (f"<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
+                f"<title>SCREENER &middot; Momentum</title>{DATA_PAGE_CSS}</head>"
+                f"<body><div class='wrap'>{neon_logo('Momentum — CMC Trending × Binance')}"
+                f'<a href="{home}" class="btn">&#8962; Home</a>'
+                f'<h2>No momentum data yet</h2>'
+                f'<p class="meta">Run <code>python3 build_momentum.py</code> to generate it.</p>'
+                f"</div></body></html>")
+    data = json.loads(MOMENTUM_FILE.read_text())
+    cfg = data.get("config", {})
+    w = cfg.get("weights", {})
+    rows_html = []
+    for r in data.get("rows", []):
+        mom = r.get("momentum")
+        if r.get("market") == "none" or r.get("score") is None:
+            bg = "rgba(125,132,153,.05)"
+        else:
+            bg = "rgba(63,224,138,.10)" if mom else "rgba(255,90,110,.04)"
+        score = r.get("score")
+        score_cell = (f"<td data-order='{score}'><b>{score:.2f}</b></td>"
+                      if score is not None else "<td data-order='-1e9'>-</td>")
+        roc = r.get("roc", {})
+        ext = r.get("extension_1h")
+        ext_cell = (f"<td data-order='{ext}'>{ext:+.1f}</td>" if ext is not None
+                    else "<td data-order='-1e9'>-</td>")
+        if mom:
+            flag = '<span class="chip good">UPTREND</span>'
+        elif r.get("market") == "none" or score is None:
+            flag = f'<span class="chip bad" title="{r.get("reason","")}">n/a</span>'
+        else:
+            flag = f'<span class="chip bad" title="{r.get("reason","")}">{r.get("reason","no")}</span>'
+        mkt = r.get("market", "none")
+        mkt_cell = ('<span class="yes">fut</span>' if mkt == "futures"
+                    else ('<span class="muted">spot</span>' if mkt == "spot"
+                          else '<span class="no">&mdash;</span>'))
+        chart = tradingview_link(r["coin"]) if mkt != "none" else "&middot;"
+        rows_html.append(
+            f"<tr style='background:{bg}'>"
+            f"<td>{r.get('cmc_rank','')}</td>"
+            f"<td>{coin_link(r['coin'], token)}</td>"
+            f"<td>{chart}</td>"
+            f"{score_cell}"
+            f"{_roc_cell(roc.get('1h'))}"
+            f"{_roc_cell(roc.get('2h'))}"
+            f"{_roc_cell(roc.get('4h'))}"
+            f"{ext_cell}"
+            f"<td data-order='{1 if r.get('trend',{}).get('4h') else 0}'>{_trend_pill(r.get('trend',{}).get('4h'))}</td>"
+            f"<td>{mkt_cell}</td>"
+            f"<td data-order='{len(r.get('exchanges') or [])}'>{_exch_badges(r.get('exchanges'))}</td>"
+            f"<td data-order='{1 if mom else 0}'>{flag}</td></tr>"
+        )
+    html = f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SCREENER &middot; Momentum</title>
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+{DATA_PAGE_CSS}
+</head><body><div class="wrap">
+{neon_logo("Momentum — CMC Trending × Binance 1h/2h/4h")}
+{nav_bar(request, token)}
+{auth_status_html(request)}
+<h2>Momentum — trending coins in a real uptrend</h2>
+<p class="meta">CoinMarketCap's {data.get('total')} trending coins, scored on Binance
+<b>1h/2h/4h</b> candles (weights {w.get('1h')}/{w.get('2h')}/{w.get('4h')} — strong on 1h).
+<span class="chip good">UPTREND</span> = composite score &ge; {cfg.get('min_score')}, 1h rising,
+NOT overextended (1h &le; {cfg.get('max_extension_pct')}% above its EMA{cfg.get('ema_slow')}),
+no single-bar spike (&le; {cfg.get('max_single_bar_pct')}%), and 4h trend confirms — i.e.
+a genuine climb, <b>not a post-pump</b> top. <b>{data.get('count_momentum')}</b> qualify now.
+Ext% = how far 1h price sits above its mean (high = stretched).
+Exchanges = listed on <span class="exch b">B</span>inance / <span class="exch m">M</span>EXC /
+<span class="exch hl">HL</span> Hyperliquid.<br>
+Source {data.get('source')} · generated {data.get('generated_utc')} UTC.</p>
+<div class="searchbar">
+  <span class="sicon">&#128269;</span>
+  <input id="momentumsearch" type="search" placeholder="Search coin, rank or value…" autocomplete="off" autofocus>
+  <button id="searchbtn" class="sbtn" type="button">Search</button>
+  <button id="clearbtn" class="sbtn clear" type="button">Clear</button>
+</div>
+<table id="rank" class="display" style="width:100%">
+<thead><tr><th>CMC#</th><th>Coin</th><th>Chart</th><th>Score</th><th>1h&nbsp;%</th><th>2h&nbsp;%</th><th>4h&nbsp;%</th>
+<th>Ext&nbsp;%</th><th>4h&nbsp;Trend</th><th>Mkt</th><th>Exchanges</th><th>Momentum</th></tr></thead>
+<tbody>
+{''.join(rows_html)}
+</tbody></table>
+<script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+<script>$(document).ready(function(){{
+  var dt=$('#rank').DataTable({{"pageLength":50,"order":[[3,"desc"]],"dom":"lrtip",
+    "columnDefs":[{{"orderable":false,"searchable":false,"targets":[2]}}]}});
+  var box=document.getElementById('momentumsearch');
+  function doSearch(){{ dt.search(box.value).draw(); }}
+  box.addEventListener('input', doSearch);
+  box.addEventListener('keydown', function(e){{ if(e.key==='Enter'){{ e.preventDefault(); doSearch(); }} }});
+  document.getElementById('searchbtn').addEventListener('click', doSearch);
+  document.getElementById('clearbtn').addEventListener('click', function(){{ box.value=''; doSearch(); box.focus(); }});
+}});</script>
+</div></body></html>"""
+    return html
+
+
+@app.get("/momentum.json")
+async def momentum_json(request: Request):
+    require_api_auth(request)
+    if not MOMENTUM_FILE.exists():
+        raise HTTPException(status_code=404, detail="Momentum data not generated yet.")
+    return JSONResponse(json.loads(MOMENTUM_FILE.read_text()))
 
 
 # --- Endpoint: Combined view — select on MEXC, backtest on Binance ---

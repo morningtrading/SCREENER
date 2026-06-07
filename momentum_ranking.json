@@ -1,0 +1,325 @@
+{
+  "generated_utc": "2026-06-07T09:06:40Z",
+  "source": "cmc_data_api",
+  "config": {
+    "timeframes": [
+      "1h",
+      "2h",
+      "4h"
+    ],
+    "weights": {
+      "1h": 0.5,
+      "2h": 0.3,
+      "4h": 0.2
+    },
+    "roc_lookback_bars": 6,
+    "ema_fast": 9,
+    "ema_slow": 21,
+    "slope_bars": 3,
+    "klines_limit": 60,
+    "trend_down_factor": 0.3,
+    "damp_floor": 0.2,
+    "max_extension_pct": 12.0,
+    "max_single_bar_pct": 6.0,
+    "min_score": 1.0,
+    "require_uptrend_alignment": true,
+    "spot_fallback": true,
+    "candidate_limit": 30
+  },
+  "total": 10,
+  "count_momentum": 2,
+  "rows": [
+    {
+      "coin": "EDEN",
+      "name": "OpenEden",
+      "cmc_rank": 730,
+      "price": 0.05045820026872004,
+      "cmc_change_24h": 28.46987531,
+      "volume24h": 63328484.46465002,
+      "market": "futures",
+      "exchanges": [
+        "binance",
+        "mexc"
+      ],
+      "in_pairlist": false,
+      "score": 2.342,
+      "momentum": true,
+      "reason": "",
+      "extension_1h": 7.53,
+      "last_bar_1h": -1.44,
+      "roc": {
+        "1h": 6.05,
+        "2h": 9.54,
+        "4h": 25.65
+      },
+      "trend": {
+        "1h": true,
+        "2h": true,
+        "4h": true
+      },
+      "rank": 1
+    },
+    {
+      "coin": "BLESS",
+      "name": "Bless",
+      "cmc_rank": 894,
+      "price": 0.006159743526317809,
+      "cmc_change_24h": 30.24457711,
+      "volume24h": 13768696.46888695,
+      "market": "futures",
+      "exchanges": [
+        "binance",
+        "mexc"
+      ],
+      "in_pairlist": false,
+      "score": 1.937,
+      "momentum": true,
+      "reason": "",
+      "extension_1h": 9.06,
+      "last_bar_1h": -0.27,
+      "roc": {
+        "1h": 1.26,
+        "2h": 18.12,
+        "4h": 27.22
+      },
+      "trend": {
+        "1h": true,
+        "2h": true,
+        "4h": true
+      },
+      "rank": 2
+    },
+    {
+      "coin": "FIDA",
+      "name": "Bonfida",
+      "cmc_rank": 600,
+      "price": 0.028118398406873264,
+      "cmc_change_24h": 54.24797244,
+      "volume24h": 128679556.191451,
+      "market": "futures",
+      "exchanges": [
+        "binance",
+        "mexc"
+      ],
+      "in_pairlist": false,
+      "score": 3.751,
+      "momentum": false,
+      "reason": "overextended (1h 14.5% > 12.0%)",
+      "extension_1h": 14.55,
+      "last_bar_1h": -1.15,
+      "roc": {
+        "1h": 11.55,
+        "2h": 20.12,
+        "4h": 53.5
+      },
+      "trend": {
+        "1h": true,
+        "2h": true,
+        "4h": true
+      },
+      "rank": 3
+    },
+    {
+      "coin": "B",
+      "name": "BUILDon",
+      "cmc_rank": 106,
+      "price": 0.282720356264044,
+      "cmc_change_24h": 24.18125307,
+      "volume24h": 10345144.52272642,
+      "market": "futures",
+      "exchanges": [
+        "binance",
+        "mexc"
+      ],
+      "in_pairlist": false,
+      "score": 2.952,
+      "momentum": false,
+      "reason": "overextended (1h 14.4% > 12.0%)",
+      "extension_1h": 14.35,
+      "last_bar_1h": 2.12,
+      "roc": {
+        "1h": 16.97,
+        "2h": 16.55,
+        "4h": 24.57
+      },
+      "trend": {
+        "1h": true,
+        "2h": true,
+        "4h": true
+      },
+      "rank": 4
+    },
+    {
+      "coin": "BSB",
+      "name": "Block Street",
+      "cmc_rank": 357,
+      "price": 0.25823108653503757,
+      "cmc_change_24h": 28.5956948,
+      "volume24h": 24827501.04977214,
+      "market": "futures",
+      "exchanges": [
+        "binance",
+        "mexc"
+      ],
+      "in_pairlist": false,
+      "score": 2.257,
+      "momentum": false,
+      "reason": "4h trend not up",
+      "extension_1h": 9.68,
+      "last_bar_1h": -3.77,
+      "roc": {
+        "1h": 15.46,
+        "2h": 14.66,
+        "4h": 28.84
+      },
+      "trend": {
+        "1h": true,
+        "2h": true,
+        "4h": false
+      },
+      "rank": 5
+    },
+    {
+      "coin": "UB",
+      "name": "Unibase",
+      "cmc_rank": 215,
+      "price": 0.11840614427474434,
+      "cmc_change_24h": 10.53644502,
+      "volume24h": 16163102.57830466,
+      "market": "futures",
+      "exchanges": [
+        "binance",
+        "mexc"
+      ],
+      "in_pairlist": false,
+      "score": 1.456,
+      "momentum": false,
+      "reason": "4h trend not up",
+      "extension_1h": 4.59,
+      "last_bar_1h": 0.34,
+      "roc": {
+        "1h": 1.13,
+        "2h": 4.8,
+        "4h": 11.18
+      },
+      "trend": {
+        "1h": true,
+        "2h": true,
+        "4h": false
+      },
+      "rank": 6
+    },
+    {
+      "coin": "CC",
+      "name": "Canton",
+      "cmc_rank": 14,
+      "price": 0.16522340862151075,
+      "cmc_change_24h": 8.0162404,
+      "volume24h": 38346743.3486451,
+      "market": "futures",
+      "exchanges": [
+        "binance",
+        "mexc",
+        "hl"
+      ],
+      "in_pairlist": true,
+      "score": 0.877,
+      "momentum": false,
+      "reason": "score 0.88 < 1.0",
+      "extension_1h": 2.65,
+      "last_bar_1h": 0.47,
+      "roc": {
+        "1h": 0.49,
+        "2h": 0.4,
+        "4h": 7.68
+      },
+      "trend": {
+        "1h": true,
+        "2h": true,
+        "4h": true
+      },
+      "rank": 7
+    },
+    {
+      "coin": "SKYAI",
+      "name": "SKYAI",
+      "cmc_rank": 101,
+      "price": 0.2981826220726881,
+      "cmc_change_24h": 42.72669655,
+      "volume24h": 127595422.53197652,
+      "market": "futures",
+      "exchanges": [
+        "binance",
+        "mexc"
+      ],
+      "in_pairlist": false,
+      "score": 0.465,
+      "momentum": false,
+      "reason": "score 0.47 < 1.0",
+      "extension_1h": -1.24,
+      "last_bar_1h": -5.2,
+      "roc": {
+        "1h": 5.45,
+        "2h": -20.77,
+        "4h": 39.48
+      },
+      "trend": {
+        "1h": false,
+        "2h": true,
+        "4h": true
+      },
+      "rank": 8
+    },
+    {
+      "coin": "GWEI",
+      "name": "ETHGas",
+      "cmc_rank": 125,
+      "price": 0.13059398403251163,
+      "cmc_change_24h": 25.91619646,
+      "volume24h": 22343656.54001491,
+      "market": "futures",
+      "exchanges": [
+        "binance",
+        "mexc"
+      ],
+      "in_pairlist": false,
+      "score": -0.731,
+      "momentum": false,
+      "reason": "score -0.73 < 1.0",
+      "extension_1h": -0.18,
+      "last_bar_1h": -0.19,
+      "roc": {
+        "1h": -10.73,
+        "2h": -2.08,
+        "4h": 21.38
+      },
+      "trend": {
+        "1h": false,
+        "2h": true,
+        "4h": true
+      },
+      "rank": 9
+    },
+    {
+      "coin": "\u5e01\u5b89\u4eba\u751f",
+      "name": "\u5e01\u5b89\u4eba\u751f",
+      "cmc_rank": 63,
+      "price": 0.8517785341440244,
+      "cmc_change_24h": 25.18692148,
+      "volume24h": 87440523.96356256,
+      "market": "none",
+      "exchanges": [
+        "binance"
+      ],
+      "in_pairlist": false,
+      "score": null,
+      "momentum": false,
+      "reason": "no Binance market",
+      "extension_1h": null,
+      "last_bar_1h": null,
+      "roc": {},
+      "trend": {},
+      "rank": 10
+    }
+  ]
+}

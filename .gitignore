@@ -12,3 +12,6 @@ data/futures/*
 
 # Agent worktrees / local tooling
 .claude/
+
+# Raw per-run CMC trending snapshots accumulate (the momentum_ranking.json output is kept)
+momentum/

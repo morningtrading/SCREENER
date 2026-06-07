@@ -142,6 +142,8 @@ once you have a session). Scripts can keep using the token or Basic auth.
 | `/binance-ranking` | **Every** Binance perpetual ranked; filtered by volume, spread, volatility; green = tradeable |
 | `/mexc-ranking` | Same ranking for **MEXC** futures (public API, no key); coin names link to Binance data |
 | `/combined` | **Trade-on-MEXC** selection view + Binance backtest-data (CSV) links side by side |
+| `/momentum` | **CoinMarketCap trending** coins scored on Binance 1h/2h/4h; green = real uptrend, not post-pump |
+| `/momentum.json` | Machine-readable momentum scores (the same data as `/momentum`) |
 | `/binance-good-pairs.json` / `/mexc-good-pairs.json` | The "good" coins as a JSON pair list (download candidates) |
 | `/file/{name}` | Download a raw `.feather` file |
 | `/csv/{name}` | Download a `.feather` file converted to CSV on the fly |
@@ -182,6 +184,51 @@ A coin is flagged **FILTER PASS** when **all** hold (otherwise **FILTER FAIL**):
 Edit `config.json` and re-run the generator — no code change needed. Point at a
 different file with `SCREENER_CONFIG=/path/to/config.json`. Any missing key falls
 back to a built-in default, so the tool still runs if the file is absent.
+
+## Momentum screener (CMC trending × Binance 1h/2h/4h)
+
+`build_momentum.py` finds coins that are *trending and actually climbing* — not ones that
+already pumped and are rolling over:
+
+```bash
+.venv/bin/python build_momentum.py   # writes momentum_ranking.json (+ snapshots under momentum/)
+```
+
+It (1) scrapes **CoinMarketCap's trending list** (the candidate set the market is watching),
+(2) pulls **1h, 2h and 4h** candles from Binance for each coin (USDⓈ-M futures, falling back
+to spot), and (3) scores momentum with a **strong weight on 1h**. A coin is flagged
+**UPTREND** (green on `/momentum`) only when it is a genuine advance, *not a post-pump top*:
+
+- composite score ≥ `min_score`, and 1h is still rising;
+- **not overextended** — 1h price ≤ `max_extension_pct` above its EMA (a blown-off top is rejected);
+- **no single-bar spike** — the last 1h candle moved ≤ `max_single_bar_pct` (rejects one vertical candle);
+- the **4h trend confirms** the move (`require_uptrend_alignment`) so a 1h blip alone doesn't qualify.
+
+### Momentum parameters — `config.json` (`"momentum"`)
+
+All weights and thresholds are config, not code:
+
+```json
+"momentum": {
+  "timeframes": ["1h", "2h", "4h"],
+  "weights": { "1h": 0.5, "2h": 0.3, "4h": 0.2 },
+  "roc_lookback_bars": 6,
+  "ema_fast": 9, "ema_slow": 21, "slope_bars": 3,
+  "klines_limit": 60,
+  "trend_down_factor": 0.3, "damp_floor": 0.2,
+  "max_extension_pct": 12.0,
+  "max_single_bar_pct": 6.0,
+  "min_score": 1.0,
+  "require_uptrend_alignment": true,
+  "spot_fallback": true,
+  "candidate_limit": 30
+}
+```
+
+Bump the `1h` weight for a faster signal; lower `max_extension_pct` to be stricter about
+chasing. Trending data comes from CMC's free public data-API by default; set
+`SCREENER_CMC_API_KEY` to use the official Pro API instead. Refresh from `./menu.sh`
+(option 6) or by re-running the script.
 
 ## Note on ports
 

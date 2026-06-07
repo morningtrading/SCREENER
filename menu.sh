@@ -21,6 +21,7 @@ urls() {
     echo "  Binance ranking : http://$HOST:$PORT/binance-ranking?token=$TOKEN"
     echo "  MEXC ranking    : http://$HOST:$PORT/mexc-ranking?token=$TOKEN"
     echo "  Combined        : http://$HOST:$PORT/combined?token=$TOKEN"
+    echo "  Momentum        : http://$HOST:$PORT/momentum?token=$TOKEN"
 }
 
 while true; do
@@ -33,8 +34,9 @@ while true; do
     echo "  3) Status / health check"
     echo "  4) Refresh FULL Binance ranking"
     echo "  5) Refresh FULL MEXC ranking"
-    echo "  6) Show URLs (with token)"
-    echo "  7) Tail dashboard log"
+    echo "  6) Refresh MOMENTUM (CMC trending × Binance)"
+    echo "  7) Show URLs (with token)"
+    echo "  8) Tail dashboard log"
     echo "  0) Exit"
     echo "--------------------------------------------"
     read -rp "Choose: " c
@@ -44,8 +46,9 @@ while true; do
         3) ./status_screener.sh ;;
         4) "$PY" build_binance_ranking.py ;;
         5) "$PY" build_mexc_ranking.py ;;
-        6) urls ;;
-        7) tail -n 30 -f screener.log ;;
+        6) "$PY" build_momentum.py ;;
+        7) urls ;;
+        8) tail -n 30 -f screener.log ;;
         0) exit 0 ;;
         *) echo "Invalid choice" ;;
     esac

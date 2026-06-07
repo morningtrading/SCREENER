@@ -7,5 +7,22 @@
     "min_volume_usdt": 1000000,
     "max_spread_pct": 0.10,
     "min_volatility_pct": 2.0
+  },
+  "momentum": {
+    "timeframes": ["1h", "2h", "4h"],
+    "weights": { "1h": 0.5, "2h": 0.3, "4h": 0.2 },
+    "roc_lookback_bars": 6,
+    "ema_fast": 9,
+    "ema_slow": 21,
+    "slope_bars": 3,
+    "klines_limit": 60,
+    "trend_down_factor": 0.3,
+    "damp_floor": 0.2,
+    "max_extension_pct": 12.0,
+    "max_single_bar_pct": 6.0,
+    "min_score": 1.0,
+    "require_uptrend_alignment": true,
+    "spot_fallback": true,
+    "candidate_limit": 30
   }
 }
