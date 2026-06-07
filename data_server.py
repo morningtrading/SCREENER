@@ -1299,7 +1299,7 @@ Source {data.get('source')} · generated {gen} UTC · <b id="dataage">{age_txt}<
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
 <script>$(document).ready(function(){{
-  var dt=$('#rank').DataTable({{"pageLength":50,"order":[[3,"desc"]],"dom":"lrtip",
+  var dt=$('#rank').DataTable({{"pageLength":50,"order":[[4,"desc"]],"dom":"lrtip",
     "columnDefs":[{{"orderable":false,"searchable":false,"targets":[2]}}]}});
   var gts={int(gen_ts) if gen_ts else 0}, ageEl=document.getElementById('dataage');
   if(gts && ageEl){{ function upd(){{ ageEl.textContent=Math.max(0,Math.floor((Date.now()/1000-gts)/60)); }} upd(); setInterval(upd,30000); }}
