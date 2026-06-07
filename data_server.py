@@ -732,7 +732,7 @@ def neon_logo(subtitle: str) -> str:
 
 
 def nav_bar(request: Request, token: str) -> str:
-    """The numbered top navigation, identical on every page. GOOD-pairs is hidden for read-only users."""
+    """The numbered top navigation, identical on every page."""
     items = [
         ("Home", with_token("/", token), ""),
         ("Data Summary", with_token("/summary", token), ""),
@@ -740,8 +740,6 @@ def nav_bar(request: Request, token: str) -> str:
         ("Momentum", with_token("/momentum", token), ""),
         ("Raw JSON", with_token("/summary.json", token), ""),
     ]
-    if not is_readonly(request):
-        items.append(("GOOD pairs", with_token("/binance-good-pairs.json", token), " dl"))
     links = "".join(
         f'<a class="navbtn{cls}" href="{url}"><span class="num">-{i}-</span>{label}</a>'
         for i, (label, url, cls) in enumerate(items, 1)
