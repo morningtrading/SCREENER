@@ -77,6 +77,7 @@ _DEFAULTS = {
         "funding_max": 0.0003,         # fire 'fund' when funding <= this (not crowded-long yet)
         "early_min_signals": 2,        # >= this many leading signals -> flagged EARLY
         "early_weight": 0.2,           # small score bonus per leading signal that fires
+        "regime_coins": ["BTC", "ETH", "HYPE", "ZEC"],  # reference coins for the market-regime banner
     }
 }
 
@@ -321,15 +322,15 @@ def recent_changes(base, market, cfg):
     return {"windows": win, "buy_ratio": buy_ratio, "rvol": rvol}
 
 
-def btc_regime(cfg):
-    """BTC % change across the same windows the page uses (5/15/30/45m + 1h/2h/4h ROC).
-
-    Pure context for the regime banner — green/red/white dots, info only.
-    """
+def regime_for(base, market, cfg):
+    """A reference coin's % change across the same windows the page uses
+    (5/15/30/45m + 1h/2h/4h ROC). Pure context for the regime banner — info only."""
     out = {}
-    out.update(recent_changes("BTC", "futures", cfg).get("windows", {}))
+    if not market:
+        return out
+    out.update(recent_changes(base, market, cfg).get("windows", {}))
     for tf in cfg["timeframes"]:
-        kl = fetch_klines("BTC", "futures", tf, cfg["klines_limit"])
+        kl = fetch_klines(base, market, tf, cfg["klines_limit"])
         m = tf_metrics(kl, cfg) if kl else None
         if m:
             out[tf] = round(m["roc"], 3)
@@ -581,11 +582,18 @@ def main():
     for i, r in enumerate(rows, 1):
         r["rank"] = i
 
+    # Market-regime reference coins (info-only banner).
+    regime = {}
+    for rc in CFG.get("regime_coins", ["BTC", "ETH", "HYPE", "ZEC"]):
+        rcu = rc.upper()
+        mkt = "futures" if rcu in perp else ("spot" if f"{rcu}USDT" in spot else None)
+        regime[rcu] = regime_for(rcu, mkt, CFG)
+
     out = {
         "generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "source": source,
         "config": CFG,
-        "btc": btc_regime(CFG),
+        "regime": regime,
         "total": len(rows),
         "count_momentum": sum(1 for r in rows if r["momentum"]),
         "rows": rows,

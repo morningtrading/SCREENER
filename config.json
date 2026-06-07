@@ -27,6 +27,23 @@
     "spot_fallback": true,
     "candidate_limit": 30,
     "snapshot_keep": 300,
-    "recent_windows_min": [5, 15, 30, 45]
+    "recent_windows_min": [5, 15, 30, 45],
+
+    "buy_ratio_bars": 6,
+    "buy_ratio_min": 0.55,
+    "rvol_recent_bars": 3,
+    "rvol_base_bars": 20,
+    "rvol_min": 1.8,
+    "accel_lookback": 6,
+    "min_accel_pct": 0.2,
+    "breakout_lookback": 24,
+    "oi_hist_period": "5m",
+    "oi_lookback_bars": 6,
+    "oi_min_pct": 0.5,
+    "funding_max": 0.0003,
+    "early_min_signals": 2,
+    "early_weight": 0.2,
+
+    "regime_coins": ["BTC", "ETH", "HYPE", "ZEC"]
   }
 }
