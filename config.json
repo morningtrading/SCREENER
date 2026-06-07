@@ -24,6 +24,7 @@
     "require_uptrend_alignment": true,
     "spot_fallback": true,
     "candidate_limit": 30,
-    "snapshot_keep": 300
+    "snapshot_keep": 300,
+    "recent_windows_min": [5, 15, 30, 45]
   }
 }

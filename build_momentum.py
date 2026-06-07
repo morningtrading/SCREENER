@@ -58,6 +58,7 @@ _DEFAULTS = {
         "spot_fallback": True,         # score coins via Binance spot when they have no perpetual
         "candidate_limit": 30,         # max trending coins to evaluate
         "snapshot_keep": 300,          # how many timestamped CMC snapshots to retain (~1 day at 5-min cron)
+        "recent_windows_min": [5, 15, 30, 45],  # rolling % change windows (from 5m candles) for the dot strip
     }
 }
 
@@ -224,6 +225,24 @@ def tf_score(m, cfg):
     return raw * trend_mult * damp
 
 
+def recent_changes(base, market, cfg):
+    """Rolling % change over the very-recent windows (default 5/15/30/45 min) from 5m candles.
+
+    Returns e.g. {"5m": 0.12, "15m": -0.4, "30m": 0.8, "45m": 1.1} — used for the dot strip.
+    """
+    windows = cfg.get("recent_windows_min", [5, 15, 30, 45])
+    bars = [max(1, int(w) // 5) for w in windows]          # 5m candles → bars per window
+    closes = fetch_klines(base, market, "5m", max(bars) + 3)
+    if not closes or len(closes) < max(bars) + 1:
+        return {}
+    last = closes[-1]
+    out = {}
+    for w, nb in zip(windows, bars):
+        ref = closes[-1 - nb]
+        out[f"{w}m"] = round((last / ref - 1.0) * 100.0, 3) if ref else 0.0
+    return out
+
+
 def score_coin(base, market, cfg):
     """Fetch all timeframes for a coin and compute composite score + momentum verdict."""
     tfs = cfg["timeframes"]
@@ -336,6 +355,7 @@ def main():
             "in_pairlist": base in pairlist,
             "score": None, "momentum": False, "reason": "",
             "extension_1h": None, "last_bar_1h": None, "roc": {}, "trend": {},
+            "recent": {},
         }
         if market != "none":
             res = score_coin(base, market, CFG)
@@ -343,6 +363,7 @@ def main():
                 row["reason"] = "no/short candles"
             else:
                 row.update(res)
+            row["recent"] = recent_changes(base, market, CFG)
         else:
             row["reason"] = "no Binance market"
         rows.append(row)

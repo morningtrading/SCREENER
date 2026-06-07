@@ -661,6 +661,15 @@ td.down{color:#ff7a93;}
 .exch.b{color:#f3ba2f;border-color:rgba(243,186,47,.55);background:rgba(243,186,47,.09);}
 .exch.m{color:#5ab0ff;border-color:rgba(90,176,255,.55);background:rgba(90,176,255,.09);}
 .exch.hl{color:#b98cff;border-color:rgba(185,140,255,.55);background:rgba(185,140,255,.09);}
+/* recent-variation dots: colour = direction, size = magnitude, white ≈ flat */
+.dots{white-space:nowrap;}
+.dot{display:inline-block;border-radius:50%;margin:0 2px;vertical-align:middle;}
+.dot.s{width:7px;height:7px;}
+.dot.m{width:11px;height:11px;}
+.dot.l{width:16px;height:16px;}
+.dot.g{background:#3fe08a;box-shadow:0 0 7px rgba(63,224,138,.75);}
+.dot.r{background:#ff5a6e;box-shadow:0 0 7px rgba(255,90,110,.75);}
+.dot.w{background:#e8edf5;box-shadow:0 0 5px rgba(232,237,245,.6);}
 /* auth-status pill */
 .authpill{display:inline-block;margin:8px 0 16px;padding:7px 14px;border-radius:999px;font-size:12.5px;
   background:rgba(0,255,255,.06);border:1px solid rgba(0,255,255,.28);color:#cfefff;}
@@ -1156,6 +1165,25 @@ def _exch_badges(exchanges) -> str:
     return "".join(parts) if parts else '<span class="no">&mdash;</span>'
 
 
+def _recent_dots(recent) -> str:
+    """A strip of dots for the recent windows (5/15/30/45m): green up, red down, white ~flat;
+    dot size grows with the size of the move."""
+    if not recent:
+        return '<span class="no">&mdash;</span>'
+    order = sorted(recent.keys(), key=lambda k: int(k.rstrip("m")))
+    dots = []
+    for k in order:
+        v = recent.get(k)
+        if v is None:
+            dots.append(f'<span class="dot w s" title="{k}: n/a"></span>')
+            continue
+        a = abs(v)
+        color = "w" if a < 0.1 else ("g" if v > 0 else "r")
+        size = "s" if (color == "w" or a < 0.3) else ("m" if a < 1.0 else "l")
+        dots.append(f'<span class="dot {color} {size}" title="{k}: {v:+.2f}%"></span>')
+    return f'<span class="dots">{"".join(dots)}</span>'
+
+
 def _gen_epoch(iso) -> Optional[float]:
     """Parse a 'YYYY-MM-DDThh:mm:ssZ' UTC string to an epoch (seconds); None if unparseable."""
     try:
@@ -1223,6 +1251,7 @@ async def momentum_page(request: Request):
             f"<td>{coin_link(r['coin'], token)}</td>"
             f"<td>{chart}</td>"
             f"{score_cell}"
+            f"<td data-order='{sum(v for v in (r.get('recent') or {}).values() if v is not None):.3f}'>{_recent_dots(r.get('recent'))}</td>"
             f"{_roc_cell(roc.get('1h'))}"
             f"{_roc_cell(roc.get('2h'))}"
             f"{_roc_cell(roc.get('4h'))}"
@@ -1250,7 +1279,9 @@ no single-bar spike (&le; {cfg.get('max_single_bar_pct')}%), and 4h trend confir
 a genuine climb, <b>not a post-pump</b> top. <b>{data.get('count_momentum')}</b> qualify now.
 Ext% = how far 1h price sits above its mean (high = stretched).
 Exchanges = listed on <span class="exch b">B</span>inance / <span class="exch m">M</span>EXC /
-<span class="exch hl">HL</span> Hyperliquid.<br>
+<span class="exch hl">HL</span> Hyperliquid.
+Recent dots (5·15·30·45 min): <span class="dot g m"></span>&nbsp;up
+<span class="dot r m"></span>&nbsp;down <span class="dot w s"></span>&nbsp;~flat — bigger dot = bigger move (hover for %).<br>
 Source {data.get('source')} · generated {gen} UTC · <b id="dataage">{age_txt}</b> min old
 <span class="muted">(auto-refreshes every 5 min)</span>.</p>
 <div class="searchbar">
@@ -1260,7 +1291,7 @@ Source {data.get('source')} · generated {gen} UTC · <b id="dataage">{age_txt}<
   <button id="clearbtn" class="sbtn clear" type="button">Clear</button>
 </div>
 <table id="rank" class="display" style="width:100%">
-<thead><tr><th>CMC#</th><th>Coin</th><th>Chart</th><th>Score</th><th>1h&nbsp;%</th><th>2h&nbsp;%</th><th>4h&nbsp;%</th>
+<thead><tr><th>CMC#</th><th>Coin</th><th>Chart</th><th>Score</th><th>Recent<br>5·15·30·45m</th><th>1h&nbsp;%</th><th>2h&nbsp;%</th><th>4h&nbsp;%</th>
 <th>Ext&nbsp;%</th><th>4h&nbsp;Trend</th><th>Mkt</th><th>Exchanges</th><th>Momentum</th></tr></thead>
 <tbody>
 {''.join(rows_html)}
