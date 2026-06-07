@@ -57,6 +57,7 @@ _DEFAULTS = {
         "require_uptrend_alignment": True,  # require the 4h trend to confirm (not just a 1h blip)
         "spot_fallback": True,         # score coins via Binance spot when they have no perpetual
         "candidate_limit": 30,         # max trending coins to evaluate
+        "snapshot_keep": 300,          # how many timestamped CMC snapshots to retain (~1 day at 5-min cron)
     }
 }
 
@@ -280,6 +281,14 @@ def main():
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     (SNAP_DIR / f"cmc_trending_{stamp}.json").write_text(json.dumps(trending, indent=2))
     (SNAP_DIR / "cmc_trending_latest.json").write_text(json.dumps(trending, indent=2))
+    # Keep history bounded (cron runs every 5 min): retain only the newest N timestamped snapshots.
+    keep = max(1, int(CFG.get("snapshot_keep", 300)))
+    snaps = sorted(SNAP_DIR.glob("cmc_trending_2*.json"))  # excludes cmc_trending_latest.json
+    for old in snaps[:-keep]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
 
     trending = trending[: CFG["candidate_limit"]]
     perp = futures_perp_bases()

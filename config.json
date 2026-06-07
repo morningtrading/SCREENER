@@ -23,6 +23,7 @@
     "min_score": 1.0,
     "require_uptrend_alignment": true,
     "spot_fallback": true,
-    "candidate_limit": 30
+    "candidate_limit": 30,
+    "snapshot_keep": 300
   }
 }

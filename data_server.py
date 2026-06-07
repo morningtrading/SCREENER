@@ -20,7 +20,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from typing import List, Dict, Optional, Tuple
 import pandas as pd
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import quote_plus
 from dotenv import load_dotenv
 
@@ -1156,6 +1156,14 @@ def _exch_badges(exchanges) -> str:
     return "".join(parts) if parts else '<span class="no">&mdash;</span>'
 
 
+def _gen_epoch(iso) -> Optional[float]:
+    """Parse a 'YYYY-MM-DDThh:mm:ssZ' UTC string to an epoch (seconds); None if unparseable."""
+    try:
+        return datetime.strptime(iso, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
 def _roc_cell(val) -> str:
     if val is None:
         return "<td data-order='-1e9'>-</td>"
@@ -1180,6 +1188,10 @@ async def momentum_page(request: Request):
     data = json.loads(MOMENTUM_FILE.read_text())
     cfg = data.get("config", {})
     w = cfg.get("weights", {})
+    gen = data.get("generated_utc")
+    gen_ts = _gen_epoch(gen)
+    age_min = int(max(0, (datetime.now(timezone.utc).timestamp() - gen_ts) / 60)) if gen_ts else None
+    age_txt = str(age_min) if age_min is not None else "?"
     rows_html = []
     for r in data.get("rows", []):
         mom = r.get("momentum")
@@ -1239,7 +1251,8 @@ a genuine climb, <b>not a post-pump</b> top. <b>{data.get('count_momentum')}</b>
 Ext% = how far 1h price sits above its mean (high = stretched).
 Exchanges = listed on <span class="exch b">B</span>inance / <span class="exch m">M</span>EXC /
 <span class="exch hl">HL</span> Hyperliquid.<br>
-Source {data.get('source')} · generated {data.get('generated_utc')} UTC.</p>
+Source {data.get('source')} · generated {gen} UTC · <b id="dataage">{age_txt}</b> min old
+<span class="muted">(auto-refreshes every 5 min)</span>.</p>
 <div class="searchbar">
   <span class="sicon">&#128269;</span>
   <input id="momentumsearch" type="search" placeholder="Search coin, rank or value…" autocomplete="off" autofocus>
@@ -1257,6 +1270,8 @@ Source {data.get('source')} · generated {data.get('generated_utc')} UTC.</p>
 <script>$(document).ready(function(){{
   var dt=$('#rank').DataTable({{"pageLength":50,"order":[[3,"desc"]],"dom":"lrtip",
     "columnDefs":[{{"orderable":false,"searchable":false,"targets":[2]}}]}});
+  var gts={int(gen_ts) if gen_ts else 0}, ageEl=document.getElementById('dataage');
+  if(gts && ageEl){{ function upd(){{ ageEl.textContent=Math.max(0,Math.floor((Date.now()/1000-gts)/60)); }} upd(); setInterval(upd,30000); }}
   var box=document.getElementById('momentumsearch');
   function doSearch(){{ dt.search(box.value).draw(); }}
   box.addEventListener('input', doSearch);
