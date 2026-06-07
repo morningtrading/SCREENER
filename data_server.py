@@ -670,6 +670,9 @@ td.down{color:#ff7a93;}
 .dot.g{background:#3fe08a;box-shadow:0 0 7px rgba(63,224,138,.75);}
 .dot.r{background:#ff5a6e;box-shadow:0 0 7px rgba(255,90,110,.75);}
 .dot.w{background:#e8edf5;box-shadow:0 0 5px rgba(232,237,245,.6);}
+/* early-signal badges */
+.sig{display:inline-block;padding:1px 5px;margin:1px;border-radius:4px;font-size:9.5px;font-weight:700;
+  letter-spacing:.3px;color:#9fe7ff;border:1px solid rgba(0,255,255,.42);background:rgba(0,255,255,.08);}
 /* auth-status pill */
 .authpill{display:inline-block;margin:8px 0 16px;padding:7px 14px;border-radius:999px;font-size:12.5px;
   background:rgba(0,255,255,.06);border:1px solid rgba(0,255,255,.28);color:#cfefff;}
@@ -1184,6 +1187,43 @@ def _recent_dots(recent) -> str:
     return f'<span class="dots">{"".join(dots)}</span>'
 
 
+def _buy_cell(br) -> str:
+    """Taker-buy share as a %: green when buyers dominate, red when sellers do."""
+    if br is None:
+        return "<td data-order='-1'>-</td>"
+    cls = "up" if br >= 0.55 else ("down" if br <= 0.45 else "")
+    return f"<td data-order='{br}' class='{cls}'>{br * 100:.0f}%</td>"
+
+
+def _rvol_cell(rv) -> str:
+    """Relative volume (×baseline): green on a surge."""
+    if rv is None:
+        return "<td data-order='-1'>-</td>"
+    cls = "up" if rv >= 1.8 else ""
+    return f"<td data-order='{rv}' class='{cls}'>{rv:.1f}&times;</td>"
+
+
+def _early_cell(r) -> str:
+    """EARLY chip + a badge per leading signal that fired (hover for the value)."""
+    sigs = r.get("early_signals") or []
+    if not sigs:
+        return "<td data-order='0'><span class='no'>&mdash;</span></td>"
+    labels = {
+        "buy": ("BUY", f"taker-buy {(r.get('buy_ratio') or 0) * 100:.0f}%"),
+        "vol": ("VOL", f"rvol {r.get('rvol')}x"),
+        "accel": ("ACC", f"1h accelerating {r.get('accel_1h')}pp"),
+        "brk": ("BRK", "new breakout high"),
+        "oi": ("OI&#9650;", f"open interest {r.get('oi_change')}%"),
+        "fund": ("F", f"funding {r.get('funding')}"),
+    }
+    badges = "".join(
+        f'<span class="sig" title="{labels.get(k, (k, k))[1]}">{labels.get(k, (k, k))[0]}</span>'
+        for k in sigs
+    )
+    chip = '<span class="chip good">EARLY</span> ' if r.get("early") else ''
+    return f"<td data-order='{len(sigs)}'>{chip}{badges}</td>"
+
+
 def _gen_epoch(iso) -> Optional[float]:
     """Parse a 'YYYY-MM-DDThh:mm:ssZ' UTC string to an epoch (seconds); None if unparseable."""
     try:
@@ -1252,6 +1292,9 @@ async def momentum_page(request: Request):
             f"<td>{chart}</td>"
             f"{score_cell}"
             f"<td data-order='{sum(v for v in (r.get('recent') or {}).values() if v is not None):.3f}'>{_recent_dots(r.get('recent'))}</td>"
+            f"{_buy_cell(r.get('buy_ratio'))}"
+            f"{_rvol_cell(r.get('rvol'))}"
+            f"{_early_cell(r)}"
             f"{_roc_cell(roc.get('1h'))}"
             f"{_roc_cell(roc.get('2h'))}"
             f"{_roc_cell(roc.get('4h'))}"
@@ -1284,6 +1327,12 @@ Exchanges = listed on <span class="exch b">B</span>inance / <span class="exch m"
 <span class="exch hl">HL</span> Hyperliquid.
 Recent dots (5·15·30·45 min): <span class="dot g m"></span>&nbsp;up
 <span class="dot r m"></span>&nbsp;down <span class="dot w s"></span>&nbsp;~flat — bigger dot = bigger move (hover for %).<br>
+<b>Early-detection</b> (leading signals): <b>Buy%</b> = taker-buy share (aggressive demand),
+<b>RVOL</b> = volume vs baseline (a surge often precedes the move), and the <b>Early</b> column
+flags confluence — <span class="sig">BUY</span><span class="sig">VOL</span> demand/volume,
+<span class="sig">ACC</span> accelerating, <span class="sig">BRK</span> new-high breakout,
+<span class="sig">OI&#9650;</span> open-interest rising, <span class="sig">F</span> funding not crowded;
+<span class="chip good">EARLY</span> = {cfg.get('early_min_signals')}+ fired (hover each for the value).<br>
 Source {data.get('source')} · generated {gen} UTC · <b id="dataage">{age_txt}</b> min old
 <span class="muted">(auto-refreshes every 5 min)</span>.</p>
 <div class="searchbar">
@@ -1293,7 +1342,7 @@ Source {data.get('source')} · generated {gen} UTC · <b id="dataage">{age_txt}<
   <button id="clearbtn" class="sbtn clear" type="button">Clear</button>
 </div>
 <table id="rank" class="display" style="width:100%">
-<thead><tr><th>CMC#</th><th>Coin</th><th>Chart</th><th>Score</th><th>Recent<br>5·15·30·45m</th><th>1h&nbsp;%</th><th>2h&nbsp;%</th><th>4h&nbsp;%</th>
+<thead><tr><th>CMC#</th><th>Coin</th><th>Chart</th><th>Score</th><th>Recent<br>5·15·30·45m</th><th>Buy%</th><th>RVOL</th><th>Early</th><th>1h&nbsp;%</th><th>2h&nbsp;%</th><th>4h&nbsp;%</th>
 <th>Ext&nbsp;%</th><th>4h&nbsp;Trend</th><th>Mkt</th><th>Exchanges</th><th>Momentum</th></tr></thead>
 <tbody>
 {''.join(rows_html)}

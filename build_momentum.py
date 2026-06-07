@@ -35,6 +35,7 @@ FAPI = "https://fapi.binance.com/fapi/v1"          # USDⓈ-M futures
 SAPI = "https://api.binance.com/api/v3"            # spot (fallback)
 MEXC_DETAIL = "https://contract.mexc.com/api/v1/contract/detail"   # MEXC perp universe
 HL_INFO = "https://api.hyperliquid.xyz/info"       # Hyperliquid universe (POST)
+FDATA = "https://fapi.binance.com/futures/data"    # OI history, long/short ratios
 TIMEOUT = 12
 UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
 
@@ -61,6 +62,21 @@ _DEFAULTS = {
         "candidate_limit": 30,         # max trending coins to evaluate
         "snapshot_keep": 300,          # how many timestamped CMC snapshots to retain (~1 day at 5-min cron)
         "recent_windows_min": [5, 15, 30, 45],  # rolling % change windows (from 5m candles) for the dot strip
+        # --- Early-detection leading signals (Tier 1 + OI/funding) ---
+        "buy_ratio_bars": 6,           # 5m bars for the taker-buy ratio (aggressive demand)
+        "buy_ratio_min": 0.55,         # fire 'buy' when taker-buy share >= this
+        "rvol_recent_bars": 3,         # 5m bars treated as "now" for relative volume
+        "rvol_base_bars": 20,          # 5m bars used as the volume baseline
+        "rvol_min": 1.8,               # fire 'vol' when recent vol is >= this x baseline
+        "accel_lookback": 6,           # 1h bars per leg when measuring acceleration (2nd derivative)
+        "min_accel_pct": 0.2,          # fire 'accel' when the 1h move speeds up by >= this (pp)
+        "breakout_lookback": 24,       # 1h bars for the Donchian (new-high) breakout
+        "oi_hist_period": "5m",        # open-interest history granularity
+        "oi_lookback_bars": 6,         # OI-history bars to measure the change over (~30 min)
+        "oi_min_pct": 0.5,             # fire 'oi' when open interest rose >= this %
+        "funding_max": 0.0003,         # fire 'fund' when funding <= this (not crowded-long yet)
+        "early_min_signals": 2,        # >= this many leading signals -> flagged EARLY
+        "early_weight": 0.2,           # small score bonus per leading signal that fires
     }
 }
 
@@ -169,16 +185,59 @@ def hl_bases():
         return set()
 
 
+def funding_map():
+    """base -> last funding rate, from one bulk premiumIndex call (USDⓈ-M perps only)."""
+    try:
+        out = {}
+        for p in get_json(f"{FAPI}/premiumIndex"):
+            sym = p.get("symbol", "")
+            if sym.endswith("USDT"):
+                try:
+                    out[sym[:-4].upper()] = float(p["lastFundingRate"])
+                except (KeyError, ValueError, TypeError):
+                    pass
+        return out
+    except Exception:
+        return {}
+
+
+def oi_change(base, cfg):
+    """% change in open interest over the lookback (futures only); None if unavailable.
+
+    Rising OI alongside a rising price = new money entering (a real move, not just a squeeze).
+    """
+    period = cfg.get("oi_hist_period", "5m")
+    lb = cfg.get("oi_lookback_bars", 6)
+    try:
+        rows = get_json(f"{FDATA}/openInterestHist?symbol={base}USDT&period={period}&limit={lb + 1}")
+        oi = [float(r["sumOpenInterest"]) for r in rows]
+    except Exception:
+        return None
+    if len(oi) < 2 or oi[0] <= 0:
+        return None
+    return round((oi[-1] / oi[0] - 1.0) * 100.0, 3)
+
+
 def fetch_klines(base, market, interval, limit):
+    """Return per-bar arrays we use: close, high, low, vol, and taker-buy base vol.
+
+    Binance kline indices: 2=high 3=low 4=close 5=volume 9=taker-buy-base-volume.
+    Returns None on failure or empty.
+    """
     sym = f"{base}USDT"
     url = (f"{FAPI}/klines" if market == "futures" else f"{SAPI}/klines")
     try:
         raw = get_json(f"{url}?symbol={sym}&interval={interval}&limit={limit}")
     except (urllib.error.HTTPError, urllib.error.URLError, ValueError):
         return None
-    # close price is index 4
     try:
-        return [float(k[4]) for k in raw]
+        return {
+            "close": [float(k[4]) for k in raw],
+            "high": [float(k[2]) for k in raw],
+            "low": [float(k[3]) for k in raw],
+            "vol": [float(k[5]) for k in raw],
+            "tbv": [float(k[9]) for k in raw],   # taker buy base volume (aggressive buying)
+        }
     except (IndexError, ValueError, TypeError):
         return None
 
@@ -198,8 +257,9 @@ def clamp(x, lo, hi):
     return max(lo, min(hi, x))
 
 
-def tf_metrics(closes, cfg):
-    """Per-timeframe momentum metrics from a list of closes."""
+def tf_metrics(kl, cfg):
+    """Per-timeframe momentum metrics from a klines dict (uses closes)."""
+    closes = kl["close"] if kl else None
     if not closes or len(closes) < max(cfg["ema_slow"], cfg["roc_lookback_bars"] + 1, cfg["slope_bars"] + 1):
         return None
     close = closes[-1]
@@ -228,21 +288,37 @@ def tf_score(m, cfg):
 
 
 def recent_changes(base, market, cfg):
-    """Rolling % change over the very-recent windows (default 5/15/30/45 min) from 5m candles.
+    """From one 5m-candle fetch: the recent-% windows (dot strip) plus two leading micro-signals.
 
-    Returns e.g. {"5m": 0.12, "15m": -0.4, "30m": 0.8, "45m": 1.1} — used for the dot strip.
+    Returns {"windows": {"5m":.., ...}, "buy_ratio": 0..1 or None, "rvol": float or None}:
+      - buy_ratio: taker-buy / total volume over the last buy_ratio_bars (aggressive demand);
+      - rvol:      recent volume vs its longer baseline (a surge often precedes a breakout).
     """
     windows = cfg.get("recent_windows_min", [5, 15, 30, 45])
     bars = [max(1, int(w) // 5) for w in windows]          # 5m candles → bars per window
-    closes = fetch_klines(base, market, "5m", max(bars) + 3)
-    if not closes or len(closes) < max(bars) + 1:
-        return {}
+    need = max(max(bars) + 1, cfg.get("rvol_recent_bars", 3) + cfg.get("rvol_base_bars", 20), cfg.get("buy_ratio_bars", 6))
+    kl = fetch_klines(base, market, "5m", need + 2)
+    if not kl or len(kl["close"]) < max(bars) + 1:
+        return {"windows": {}, "buy_ratio": None, "rvol": None}
+    closes, vol, tbv = kl["close"], kl["vol"], kl["tbv"]
     last = closes[-1]
-    out = {}
+    win = {}
     for w, nb in zip(windows, bars):
         ref = closes[-1 - nb]
-        out[f"{w}m"] = round((last / ref - 1.0) * 100.0, 3) if ref else 0.0
-    return out
+        win[f"{w}m"] = round((last / ref - 1.0) * 100.0, 3) if ref else 0.0
+
+    nb = cfg.get("buy_ratio_bars", 6)
+    tv = sum(vol[-nb:])
+    buy_ratio = round(sum(tbv[-nb:]) / tv, 3) if tv > 0 else None
+
+    rn, bn = cfg.get("rvol_recent_bars", 3), cfg.get("rvol_base_bars", 20)
+    rvol = None
+    if len(vol) >= rn + bn:
+        recent_v = sum(vol[-rn:]) / rn
+        base_v = sum(vol[-(rn + bn):-rn]) / bn
+        rvol = round(recent_v / base_v, 2) if base_v > 0 else None
+
+    return {"windows": win, "buy_ratio": buy_ratio, "rvol": rvol}
 
 
 def recent_momentum(recent):
@@ -262,21 +338,65 @@ def recent_momentum(recent):
     return num / den if den else None
 
 
-def score_coin(base, market, cfg, recent=None):
+def early_signals_for(kl1h, micro, cfg):
+    """Compute the leading-indicator signals and which of them fire (the 'early' confluence).
+
+    Returns (fired:list[str], detail:dict). Signals:
+      buy  — taker-buy ratio >= buy_ratio_min (aggressive demand, leads price)
+      vol  — relative volume >= rvol_min (a surge often precedes the breakout)
+      accel— 1h move is accelerating (2nd derivative >= min_accel_pct)
+      brk  — price made a new breakout_lookback-bar high (Donchian breakout)
+      oi   — open interest up >= oi_min_pct (new money, not just a squeeze)
+      fund — funding <= funding_max (not yet crowded-long: room to run)
+    """
+    fired = []
+    detail = {"buy_ratio": micro.get("buy_ratio"), "rvol": micro.get("rvol"),
+              "oi_change": micro.get("oi_change"), "funding": micro.get("funding"),
+              "accel_1h": None, "breakout": False}
+
+    if detail["buy_ratio"] is not None and detail["buy_ratio"] >= cfg.get("buy_ratio_min", 0.55):
+        fired.append("buy")
+    if detail["rvol"] is not None and detail["rvol"] >= cfg.get("rvol_min", 1.8):
+        fired.append("vol")
+
+    if kl1h:
+        c, h = kl1h["close"], kl1h["high"]
+        alb = cfg.get("accel_lookback", 6)
+        if len(c) >= 2 * alb + 1 and c[-1 - alb] and c[-1 - 2 * alb]:
+            recent_roc = (c[-1] / c[-1 - alb] - 1.0) * 100.0
+            prior_roc = (c[-1 - alb] / c[-1 - 2 * alb] - 1.0) * 100.0
+            detail["accel_1h"] = round(recent_roc - prior_roc, 3)
+            if detail["accel_1h"] >= cfg.get("min_accel_pct", 0.2):
+                fired.append("accel")
+        blb = cfg.get("breakout_lookback", 24)
+        if len(h) >= blb + 1:
+            detail["breakout"] = c[-1] > max(h[-1 - blb:-1])
+            if detail["breakout"]:
+                fired.append("brk")
+
+    if detail["oi_change"] is not None and detail["oi_change"] >= cfg.get("oi_min_pct", 0.5):
+        fired.append("oi")
+    if detail["funding"] is not None and detail["funding"] <= cfg.get("funding_max", 0.0003):
+        fired.append("fund")
+    return fired, detail
+
+
+def score_coin(base, market, cfg, recent=None, micro=None):
     """Fetch all timeframes for a coin and compute composite score + momentum verdict.
 
-    The 5/15/30/45m `recent` strip feeds the score three ways (all config-driven):
-      1. a small weighted "recent" bucket in the composite (weights.recent);
-      2. an acceleration bonus/penalty within a confirmed uptrend (accel_weight);
-      3. a veto that rejects a coin whose last 15m dumped (max_recent_drop_pct).
+    The 5/15/30/45m `recent` strip feeds the score (recent bucket + accel term + dump veto);
+    `micro` carries the leading signals (buy ratio, rvol, OI change, funding) which, with the
+    1h breakout/acceleration, form the 'early' confluence and a small early score bonus.
     """
+    micro = micro or {}
     tfs = cfg["timeframes"]
     weights = cfg["weights"]
     per_tf = {}
+    kl_tf = {}
     for tf in tfs:
-        closes = fetch_klines(base, market, tf, cfg["klines_limit"])
-        m = tf_metrics(closes, cfg) if closes else None
-        per_tf[tf] = m
+        kl = fetch_klines(base, market, tf, cfg["klines_limit"])
+        kl_tf[tf] = kl
+        per_tf[tf] = tf_metrics(kl, cfg) if kl else None
     if any(per_tf[tf] is None for tf in tfs):
         return None  # incomplete data — treat as unscored
 
@@ -302,6 +422,11 @@ def score_coin(base, market, cfg, recent=None):
         if pace:
             accel = sum(pace) / len(pace)
     score += cfg.get("accel_weight", 0.0) * accel
+
+    # Leading-indicator confluence (Tier 1 + OI/funding) and a small early bonus.
+    fired, detail = early_signals_for(kl_tf.get("1h"), micro, cfg)
+    score += cfg.get("early_weight", 0.0) * len(fired)
+    early = len(fired) >= cfg.get("early_min_signals", 2)
 
     ext_1h = per_tf.get("1h", {}).get("extension", 0.0)
     last_1h = per_tf.get("1h", {}).get("last_bar", 0.0)
@@ -332,6 +457,14 @@ def score_coin(base, market, cfg, recent=None):
         "extension_1h": round(ext_1h, 2),
         "last_bar_1h": round(last_1h, 2),
         "recent_mom": round(rec_mom, 3) if rec_mom is not None else None,
+        "buy_ratio": detail["buy_ratio"],
+        "rvol": detail["rvol"],
+        "accel_1h": detail["accel_1h"],
+        "breakout": detail["breakout"],
+        "oi_change": detail["oi_change"],
+        "funding": detail["funding"],
+        "early_signals": fired,
+        "early": early,
         "roc": {tf: round(per_tf[tf]["roc"], 2) for tf in tfs},
         "trend": {tf: per_tf[tf]["trend_up"] for tf in tfs},
     }
@@ -363,6 +496,7 @@ def main():
     spot = spot_symbols() if CFG["spot_fallback"] else set()
     mexc = mexc_bases()        # which trending coins are also listed on MEXC perps
     hl = hl_bases()            # ...and on Hyperliquid
+    funding = funding_map()    # base -> funding rate (one bulk call, futures only)
 
     pairlist = set()
     try:
@@ -404,12 +538,20 @@ def main():
             "in_pairlist": base in pairlist,
             "score": None, "momentum": False, "reason": "",
             "extension_1h": None, "last_bar_1h": None, "roc": {}, "trend": {},
-            "recent": {},
+            "recent": {}, "recent_mom": None,
+            "buy_ratio": None, "rvol": None, "accel_1h": None, "breakout": False,
+            "oi_change": None, "funding": None, "early_signals": [], "early": False,
         }
         if market != "none":
             rec = recent_changes(base, market, CFG)
-            row["recent"] = rec
-            res = score_coin(base, market, CFG, rec)
+            row["recent"] = rec.get("windows", {})
+            micro = {
+                "buy_ratio": rec.get("buy_ratio"),
+                "rvol": rec.get("rvol"),
+                "oi_change": oi_change(base, CFG) if market == "futures" else None,
+                "funding": funding.get(base) if market == "futures" else None,
+            }
+            res = score_coin(base, market, CFG, rec.get("windows", {}), micro)
             if res is None:
                 row["reason"] = "no/short candles"
             else:

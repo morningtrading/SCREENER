@@ -208,6 +208,23 @@ when it is a genuine advance, *not a post-pump top*:
 - the **4h trend confirms** the move (`require_uptrend_alignment`) so a 1h blip alone doesn't qualify;
 - **no recent dump** — rejected if the last 15m fell more than `max_recent_drop_pct` (catching a coin rolling over).
 
+#### Early-detection (leading signals)
+
+To catch a move *before* it's obvious, each coin is also checked for leading signals — shown on
+`/momentum` as the **Buy% / RVOL / Early** columns, and contributing a small `early_weight` bonus
+per signal that fires. **Early** flags confluence (`early_min_signals`+ firing):
+
+- **BUY** — taker-buy share ≥ `buy_ratio_min` (aggressive demand, leads price);
+- **VOL** — relative volume ≥ `rvol_min` (a surge often precedes the breakout);
+- **ACC** — the 1h move is accelerating (2nd derivative ≥ `min_accel_pct`);
+- **BRK** — price made a new `breakout_lookback`-bar high (Donchian breakout);
+- **OI▲** — open interest rose ≥ `oi_min_pct` (new money entering — futures only);
+- **F** — funding ≤ `funding_max` (not yet crowded-long, so room to run — futures only).
+
+A coin can be **EARLY** without being **UPTREND** yet — that's the point: the leading signals fire
+before the 1h/2h/4h composite fully confirms. Pulled from the same candles (taker-buy/volume are in
+the kline payload) plus one bulk funding call and one open-interest call per coin.
+
 ### Momentum parameters — `config.json` (`"momentum"`)
 
 All weights and thresholds are config, not code:
@@ -229,7 +246,15 @@ All weights and thresholds are config, not code:
   "spot_fallback": true,
   "candidate_limit": 30,
   "snapshot_keep": 300,
-  "recent_windows_min": [5, 15, 30, 45]
+  "recent_windows_min": [5, 15, 30, 45],
+
+  "buy_ratio_bars": 6, "buy_ratio_min": 0.55,
+  "rvol_recent_bars": 3, "rvol_base_bars": 20, "rvol_min": 1.8,
+  "accel_lookback": 6, "min_accel_pct": 0.2,
+  "breakout_lookback": 24,
+  "oi_hist_period": "5m", "oi_lookback_bars": 6, "oi_min_pct": 0.5,
+  "funding_max": 0.0003,
+  "early_min_signals": 2, "early_weight": 0.2
 }
 ```
 
