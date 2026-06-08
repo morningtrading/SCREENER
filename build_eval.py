@@ -82,23 +82,35 @@ def coin_picks(path):
     return by_coin
 
 
-def position_close(picks, now, horizon_h, grace_s):
-    """When (and why) this position closes — (close_dt | None, reason).
+def split_episodes(picks, grace_s):
+    """Split a coin's picks into contiguous flagged episodes (each = a separate position).
 
-    A pick stays OPEN while the screener keeps re-flagging it (each re-flag within `grace_s`
-    of the previous one extends the open episode). It closes at the EARLIER of:
+    A coin can be flagged, drop off, then re-trigger as a fresh signal later. Each run of
+    flags spaced <= `grace_s` apart is one episode; a gap longer than that starts a new one.
+    Returns a list of pick-lists, oldest first (the LAST one is the current position). This is
+    why a coin flagged right now shows as OPEN even if it had an earlier, already-closed run.
+    """
+    eps, cur = [], [picks[0]]
+    for p in picks[1:]:
+        if (parse_ts(p["ts"]) - parse_ts(cur[-1]["ts"])).total_seconds() <= grace_s:
+            cur.append(p)
+        else:
+            eps.append(cur)
+            cur = [p]
+    eps.append(cur)
+    return eps
+
+
+def episode_close(ep, now, horizon_h, grace_s):
+    """When (and why) one episode closes — (close_dt | None, reason).
+
+    The episode is OPEN while the screener keeps re-flagging it. It closes at the EARLIER of:
       - "flip":    the screener stopped re-flagging it (last flag + grace has passed), or
-      - "horizon": `horizon_h` hours after entry.
+      - "horizon": `horizon_h` hours after the episode's entry.
     close_dt None => still open ("open").
     """
-    entry_dt = parse_ts(picks[0]["ts"])
-    ep_end = entry_dt                       # end of the first contiguous flagged episode
-    for p in picks[1:]:
-        t = parse_ts(p["ts"])
-        if (t - ep_end).total_seconds() <= grace_s:
-            ep_end = t
-        else:
-            break                            # a gap > grace: episode ended at ep_end
+    entry_dt = parse_ts(ep[0]["ts"])
+    ep_end = parse_ts(ep[-1]["ts"])
     horizon_close = entry_dt + timedelta(hours=horizon_h)
     cands = []
     if (now - ep_end).total_seconds() > grace_s:     # no longer being re-flagged
@@ -115,43 +127,47 @@ def pnl_of(entry, price, side):
 
 
 def evaluate(path, side, now, horizon_h, grace_s):
-    open_rows, settled_rows, series_by_coin = [], [], {}
+    open_rows, settled_rows, series = [], [], {}
     for c, picks in coin_picks(path).items():
-        entry = picks[0]
-        ep = entry.get("entry_price")
-        if not ep:
-            continue
-        src = "mexc" if entry.get("data_src") == "mexc" else "binance"
-        entry_dt = parse_ts(entry["ts"])
-        start_ms = int(entry_dt.timestamp() * 1000)
-        closes = kline_closes(c, src, start_ms)
-        if not closes:
-            continue
-        close_dt, reason = position_close(picks, now, horizon_h, grace_s)
-        close_ms = int(close_dt.timestamp() * 1000) if close_dt else None
-        # Settled pick: freeze the path (and the exit price) at the close time.
-        kept = [(t, px) for t, px in closes if close_ms is None or t <= close_ms] or closes[:1]
-        # P&L-since-call path (signed by side: rising = the position is winning)
-        path_pnl = [(t, round(pnl_of(ep, px, side), 3)) for t, px in kept if px > 0]
-        if not path_pnl:
-            continue
-        exit_price = kept[-1][1]
-        pnl = round(pnl_of(ep, exit_price, side), 2)
-        age = (now - entry_dt).total_seconds() / 3600.0
-        held = ((close_dt or now) - entry_dt).total_seconds() / 3600.0
-        # downsample for the row sparkline
-        vals = [v for _, v in path_pnl]
-        if len(vals) > SPARK_POINTS:
-            step = len(vals) / SPARK_POINTS
-            vals = [vals[int(i * step)] for i in range(SPARK_POINTS)] + [vals[-1]]
-        row = {
-            "coin": c, "ts": entry["ts"], "age_hours": round(age, 1),
-            "held_hours": round(held, 1), "entry": ep, "now": exit_price,
-            "pnl": pnl, "spark": vals, "closed": close_dt is not None, "close_reason": reason,
-            "extra": ("early" if entry.get("early") else "") if side == "long" else entry.get("reversal_risk", "none"),
-        }
-        (settled_rows if close_dt is not None else open_rows).append(row)
-        series_by_coin[c] = {"start": start_ms, "close_ms": close_ms, "path": path_pnl}
+        for ep in split_episodes(picks, grace_s):     # each flagged run is its own position
+            entry = ep[0]
+            entry_price = entry.get("entry_price")
+            if not entry_price:
+                continue
+            src = "mexc" if entry.get("data_src") == "mexc" else "binance"
+            entry_dt = parse_ts(entry["ts"])
+            # Floor to the 15m candle boundary so the entry's own candle is included right away
+            # (Binance filters by openTime, so an un-floored start drops a fresh pick until the
+            # next 15m close — which left just-flagged coins missing from the open board).
+            start_ms = (int(entry_dt.timestamp() * 1000) // 900_000) * 900_000
+            closes = kline_closes(c, src, start_ms)
+            if not closes:
+                continue
+            close_dt, reason = episode_close(ep, now, horizon_h, grace_s)
+            close_ms = int(close_dt.timestamp() * 1000) if close_dt else None
+            # Settled position: freeze the path (and the exit price) at the close time.
+            kept = [(t, px) for t, px in closes if close_ms is None or t <= close_ms] or closes[:1]
+            # P&L-since-call path (signed by side: rising = the position is winning)
+            path_pnl = [(t, round(pnl_of(entry_price, px, side), 3)) for t, px in kept if px > 0]
+            if not path_pnl:
+                continue
+            exit_price = kept[-1][1]
+            pnl = round(pnl_of(entry_price, exit_price, side), 2)
+            age = (now - entry_dt).total_seconds() / 3600.0
+            held = ((close_dt or now) - entry_dt).total_seconds() / 3600.0
+            # downsample for the row sparkline
+            vals = [v for _, v in path_pnl]
+            if len(vals) > SPARK_POINTS:
+                step = len(vals) / SPARK_POINTS
+                vals = [vals[int(i * step)] for i in range(SPARK_POINTS)] + [vals[-1]]
+            row = {
+                "coin": c, "ts": entry["ts"], "age_hours": round(age, 1),
+                "held_hours": round(held, 1), "entry": entry_price, "now": exit_price,
+                "pnl": pnl, "spark": vals, "closed": close_dt is not None, "close_reason": reason,
+                "extra": ("early" if entry.get("early") else "") if side == "long" else entry.get("reversal_risk", "none"),
+            }
+            (settled_rows if close_dt is not None else open_rows).append(row)
+            series[f"{c}@{entry['ts']}"] = {"start": start_ms, "close_ms": close_ms, "path": path_pnl}
 
     def summarize(rows, key):
         rows = sorted(rows, key=key, reverse=True)
@@ -166,9 +182,9 @@ def evaluate(path, side, now, horizon_h, grace_s):
     # Equity curve: average P&L across positions OPEN at each 15m timestamp — a position
     # drops out of the average once it settles (so a closed loser stops dragging the curve).
     equity = []
-    times = sorted({t for s in series_by_coin.values() for t, _ in s["path"]})
+    times = sorted({t for s in series.values() for t, _ in s["path"]})
     filled = {}
-    for c, s in series_by_coin.items():
+    for key, s in series.items():
         d = dict(s["path"])
         last, col = None, {}
         for t in times:
@@ -176,9 +192,9 @@ def evaluate(path, side, now, horizon_h, grace_s):
                 last = d[t]
             live = t >= s["start"] and (s["close_ms"] is None or t <= s["close_ms"])
             col[t] = last if live else None
-        filled[c] = col
+        filled[key] = col
     for t in times:
-        vals = [filled[c][t] for c in filled if filled[c][t] is not None]
+        vals = [filled[key][t] for key in filled if filled[key][t] is not None]
         if vals:
             equity.append({"t": t, "eq": round(sum(vals) / len(vals), 2)})
 
