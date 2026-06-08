@@ -45,6 +45,7 @@ urls() {
     echo "  Combined : http://$HOST:$PORT/combined?token=$TOKEN"
     echo "  Momentum : http://$HOST:$PORT/momentum?token=$TOKEN"
     echo "  Shorts   : http://$HOST:$PORT/shorts?token=$TOKEN"
+    echo "  Results  : http://$HOST:$PORT/results?token=$TOKEN"
 }
 
 while true; do

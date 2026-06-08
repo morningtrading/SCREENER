@@ -146,6 +146,8 @@ once you have a session). Scripts can keep using the token or Basic auth.
 | `/momentum.json` | Machine-readable momentum scores (the same data as `/momentum`) |
 | `/shorts` | Weakest **MEXC/HL** perps to short — weak + liquid + low reversal risk; ⚠️ flags squeeze/bounce risk |
 | `/shorts.json` | Machine-readable short scores (the same data as `/shorts`) |
+| `/results` | **Track record** — both scorecards (longs + shorts): each pick's entry price vs the live price + hit-rate |
+| `/results.json` | Machine-readable results (the same data as `/results`) |
 | `/binance-good-pairs.json` / `/mexc-good-pairs.json` | The "good" coins as a JSON pair list (download candidates) |
 | `/file/{name}` | Download a raw `.feather` file |
 | `/csv/{name}` | Download a `.feather` file converted to CSV on the fly |

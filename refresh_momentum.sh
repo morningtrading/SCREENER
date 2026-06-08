@@ -19,3 +19,4 @@ else PY="python3"; fi
 echo "=== $(date -u +%Y-%m-%dT%H:%M:%SZ) refresh ===" >> momentum_refresh.log
 "$PY" build_momentum.py >> momentum_refresh.log 2>&1
 "$PY" build_shorts.py   >> momentum_refresh.log 2>&1
+"$PY" build_eval.py     >> momentum_refresh.log 2>&1

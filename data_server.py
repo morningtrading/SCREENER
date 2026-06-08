@@ -695,6 +695,10 @@ td.down{color:#ff7a93;}
 .risktoggle{display:inline-flex;align-items:center;gap:8px;margin:0 0 14px;padding:7px 13px;border-radius:999px;
   font-size:12.5px;color:#ffe2a6;background:rgba(255,179,0,.07);border:1px solid rgba(255,179,0,.32);cursor:pointer;user-select:none;}
 .risktoggle input{accent-color:#ffb300;width:15px;height:15px;cursor:pointer;}
+/* results page: two scorecards side by side */
+.resgrid{display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:start;margin-top:6px;}
+@media(max-width:1100px){.resgrid{grid-template-columns:1fr;}}
+.resgrid h3{margin:0 0 4px;color:#cfefff;font-size:16px;letter-spacing:.5px;}
 /* auth-status pill */
 .authpill{display:inline-block;margin:8px 0 16px;padding:7px 14px;border-radius:999px;font-size:12.5px;
   background:rgba(0,255,255,.06);border:1px solid rgba(0,255,255,.28);color:#cfefff;}
@@ -747,6 +751,7 @@ def nav_bar(request: Request, token: str) -> str:
         ("Combined", with_token("/combined", token), ""),
         ("Momentum", with_token("/momentum", token), ""),
         ("Shorts", with_token("/shorts", token), ""),
+        ("Results", with_token("/results", token), ""),
         ("Raw JSON", with_token("/summary.json", token), ""),
     ]
     links = "".join(
@@ -1616,6 +1621,103 @@ async def shorts_json(request: Request):
     if not SHORTS_FILE.exists():
         raise HTTPException(status_code=404, detail="Shorts data not generated yet.")
     return JSONResponse(json.loads(SHORTS_FILE.read_text()))
+
+
+# --- Endpoint: Results — were the momentum/short calls right? (entry vs live price) ---
+EVAL_FILE = Path(__file__).resolve().parent / "eval_results.json"
+
+
+def _eval_table(d, side, token) -> str:
+    label = "Longs &mdash; momentum picks" if side == "long" else "Shorts picks"
+    moved = "rose" if side == "long" else "fell"
+    n, w, avg = d.get("count", 0), d.get("wins", 0), d.get("avg", 0)
+    if n == 0:
+        return f'<h3>{label}</h3><p class="meta">No {side} picks logged yet — they appear once the screener flags some.</p>'
+    pct = w / n * 100
+    chip = "good" if pct >= 50 else "bad"
+    summary = (f'<span class="chip {chip}">{w}/{n} right &middot; {pct:.0f}%</span> '
+               f'&nbsp;avg P&amp;L {avg:+.2f}% <span class="muted">(right = price {moved} since the call)</span>')
+    trs = []
+    for r in d.get("rows", []):
+        pnl = r["pnl"]
+        cls = "up" if pnl > 0 else ("down" if pnl < 0 else "")
+        x = r.get("extra", "")
+        if side == "short" and x and x != "none":
+            extra = f'<span class="warn {x}" title="{x} reversal risk at call">&#9888;</span>'
+        elif side == "long" and x == "early":
+            extra = '<span class="sig">EARLY</span>'
+        else:
+            extra = ""
+        trs.append(
+            f"<tr><td>{coin_link(r['coin'], token)}</td>"
+            f"<td data-order='{r['age_hours']}'>{r['age_hours']:.1f}</td>"
+            f"<td>{r['entry']:.6g}</td>"
+            f"<td>{r['now']:.6g}</td>"
+            f"<td data-order='{pnl}' class='{cls}'><b>{pnl:+.2f}%</b></td>"
+            f"<td>{extra}</td></tr>")
+    return (f'<h3>{label}</h3><p class="meta">{summary}</p>'
+            f'<table id="res{side}" class="display" style="width:100%">'
+            f'<thead><tr><th>Coin</th><th>Age&nbsp;h</th><th>Entry</th><th>Now</th><th>P&amp;L&nbsp;%</th><th></th></tr></thead>'
+            f'<tbody>{"".join(trs)}</tbody></table>')
+
+
+@app.get("/results", response_class=HTMLResponse)
+async def results_page(request: Request):
+    if not is_authenticated(request):
+        return login_redirect(request)
+    token = link_token(request)
+    home = with_token("/", token)
+    if not EVAL_FILE.exists():
+        return (f"<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
+                f"<title>SCREENER &middot; Results</title>{DATA_PAGE_CSS}</head>"
+                f"<body><div class='wrap'>{neon_logo('Results — track record')}"
+                f'<a href="{home}" class="btn">&#8962; Home</a>'
+                f'<h2>No results yet</h2>'
+                f'<p class="meta">Run <code>python3 build_eval.py</code> to generate it.</p>'
+                f"</div></body></html>")
+    data = json.loads(EVAL_FILE.read_text())
+    gen = data.get("generated_utc")
+    gen_ts = _gen_epoch(gen)
+    age_min = int(max(0, (datetime.now(timezone.utc).timestamp() - gen_ts) / 60)) if gen_ts else None
+    age_txt = str(age_min) if age_min is not None else "?"
+    html = f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SCREENER &middot; Results</title>
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+{DATA_PAGE_CSS}
+</head><body><div class="wrap">
+{neon_logo("Results — were our calls right?")}
+{nav_bar(request, token)}
+{auth_status_html(request)}
+<h2>Track record — entry price vs live price</h2>
+<p class="meta">Each coin's <b>first</b> flag is the entry; P&amp;L compares it to the current price.
+Longer <b>Age</b> = more time to play out (fresh picks near 0% are just noise).
+Evaluated {gen} UTC &middot; <b id="dataage">{age_txt}</b> min old
+<span class="muted">(auto-refreshes every 5 min)</span>.</p>
+<div class="resgrid">
+  <div>{_eval_table(data.get("longs", {}), "long", token)}</div>
+  <div>{_eval_table(data.get("shorts", {}), "short", token)}</div>
+</div>
+<script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+<script>$(document).ready(function(){{
+  ['reslong','resshort'].forEach(function(id){{
+    var el=document.getElementById(id);
+    if(el) $('#'+id).DataTable({{"paging":false,"dom":"t","order":[[4,"desc"]]}});
+  }});
+  var gts={int(gen_ts) if gen_ts else 0}, ageEl=document.getElementById('dataage');
+  if(gts && ageEl){{ function upd(){{ ageEl.textContent=Math.max(0,Math.floor((Date.now()/1000-gts)/60)); }} upd(); setInterval(upd,30000); }}
+}});</script>
+</div></body></html>"""
+    return html
+
+
+@app.get("/results.json")
+async def results_json(request: Request):
+    require_api_auth(request)
+    if not EVAL_FILE.exists():
+        raise HTTPException(status_code=404, detail="Results not generated yet.")
+    return JSONResponse(json.loads(EVAL_FILE.read_text()))
 
 
 # --- Endpoint: Combined view — select on MEXC, backtest on Binance ---
