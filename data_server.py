@@ -914,7 +914,7 @@ async def summary(request: Request):
 <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
 <script>
 $(document).ready(function() {
-    var dt=$('#summary').DataTable({"pageLength":50,"dom":"lrtip"});
+    var dt=$('#summary').DataTable({"pageLength":100,"dom":"lrtip"});
     var box=document.getElementById('tsearch');
     function doSearch(){ dt.search(box.value).draw(); }
     box.addEventListener('input', doSearch);
@@ -1044,7 +1044,7 @@ Volatility = 24h (high-low)/avg %.<br>Generated {data.get('generated_utc')} UTC.
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
 <script>$(document).ready(function(){{
-  var dt=$('#rank').DataTable({{"pageLength":50,"order":[[0,"asc"]],"dom":"lrtip",
+  var dt=$('#rank').DataTable({{"pageLength":100,"order":[[0,"asc"]],"dom":"lrtip",
     "columnDefs":[{{"orderable":false,"searchable":false,"targets":[2]}}]}});
   var box=document.getElementById('ranksearch');
   function doSearch(){{ dt.search(box.value).draw(); }}
@@ -1143,7 +1143,7 @@ Coin links go to the Binance data summary (backtest CSVs).<br>Generated {data.ge
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
 <script>$(document).ready(function(){{
-  var dt=$('#rank').DataTable({{"pageLength":50,"order":[[0,"asc"]],"dom":"lrtip",
+  var dt=$('#rank').DataTable({{"pageLength":100,"order":[[0,"asc"]],"dom":"lrtip",
     "columnDefs":[{{"orderable":false,"searchable":false,"targets":[2]}}]}});
   var box=document.getElementById('ranksearch');
   function doSearch(){{ dt.search(box.value).draw(); }}
@@ -1419,7 +1419,7 @@ Source {data.get('source')} · generated {gen} UTC · <b id="dataage">{age_txt}<
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
 <script>$(document).ready(function(){{
-  var dt=$('#rank').DataTable({{"pageLength":50,"order":[[4,"desc"]],"dom":"lrtip",
+  var dt=$('#rank').DataTable({{"pageLength":100,"order":[[4,"desc"]],"dom":"lrtip",
     "columnDefs":[{{"orderable":false,"searchable":false,"targets":[2]}}]}});
   var gts={int(gen_ts) if gen_ts else 0}, ageEl=document.getElementById('dataage');
   if(gts && ageEl){{ function upd(){{ ageEl.textContent=Math.max(0,Math.floor((Date.now()/1000-gts)/60)); }} upd(); setInterval(upd,30000); }}
@@ -1587,7 +1587,7 @@ generated {gen} UTC &middot; <b id="dataage">{age_txt}</b> min old
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
 <script>$(document).ready(function(){{
-  var dt=$('#rank').DataTable({{"pageLength":10,"order":[[16,"desc"],[3,"desc"]],"dom":"lrtip",
+  var dt=$('#rank').DataTable({{"pageLength":100,"order":[[16,"desc"],[3,"desc"]],"dom":"lrtip",
     "columnDefs":[{{"orderable":false,"searchable":false,"targets":[2]}}]}});
   var hideRisk=false;
   $.fn.dataTable.ext.search.push(function(settings,data,dataIndex){{
@@ -1701,7 +1701,7 @@ The <b>Binance Cost %</b> column and the <b>Backtest</b> CSV link are for histor
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
 <script>$(document).ready(function(){{
-  var dt=$('#rank').DataTable({{"pageLength":50,"order":[[0,"asc"]],"dom":"lrtip",
+  var dt=$('#rank').DataTable({{"pageLength":100,"order":[[0,"asc"]],"dom":"lrtip",
     "columnDefs":[{{"orderable":false,"searchable":false,"targets":[2]}}]}});
   var box=document.getElementById('ranksearch');
   function doSearch(){{ dt.search(box.value).draw(); }}
