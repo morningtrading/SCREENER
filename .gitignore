@@ -18,5 +18,7 @@ momentum_ranking.json
 shorts_ranking.json
 # Raw per-run CMC trending snapshots
 momentum/
+# Short-pick history (entry prices logged each run for later evaluation)
+shorts_history/
 # Cron refresh log
 momentum_refresh.log

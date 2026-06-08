@@ -59,6 +59,7 @@ _DEFAULTS = {
         "bounce_pct": 1.5,              # 15m already up > this = reversal underway
         "capitulation_bar_pct": 6.0,    # single 1h bar down > this = capitulation (bounce-prone)
         "regime_coins": ["BTC", "ETH", "HYPE", "ZEC"],
+        "picks_keep": 20000,            # max lines kept in shorts_history/short_picks.jsonl
     }
 }
 
@@ -92,6 +93,7 @@ def mexc_universe():
                     "vol24": float(c.get("amount24") or 0.0),
                     "funding": float(c.get("fundingRate")) if c.get("fundingRate") is not None else None,
                     "oi": float(c.get("holdVol") or 0.0),
+                    "price": float(c["lastPrice"]),
                 }
             except (KeyError, ValueError, TypeError):
                 pass
@@ -118,6 +120,7 @@ def hl_universe():
                     "vol24": float(c.get("dayNtlVlm") or 0.0),
                     "funding": float(c["funding"]) if c.get("funding") is not None else None,
                     "oi": float(c.get("openInterest") or 0.0),
+                    "price": mark,
                 }
             except (KeyError, ValueError, TypeError):
                 pass
@@ -354,9 +357,10 @@ def main():
         vol = max(m["vol24"] if m else 0.0, h["vol24"] if h else 0.0)
         change = m["change24"] if m else h["change24"]
         funding = (m or {}).get("funding") if m else (h or {}).get("funding")
-        exchanges = ([("mexc")] if m else []) + (["hl"] if h else []) + (["binance"] if b in perp else [])
+        price = m["price"] if m else h["price"]
+        exchanges = (["mexc"] if m else []) + (["hl"] if h else []) + (["binance"] if b in perp else [])
         cands.append({"coin": b, "change24": change, "vol24": vol, "funding": funding,
-                      "exchanges": exchanges})
+                      "price": price, "exchanges": exchanges})
 
     # decent volume + already weak; rank weakest first; deep-score the shortlist
     pool = [c for c in cands if c["vol24"] >= CFG["min_volume_usdt"] and c["change24"] <= CFG["max_24h_change_pct"]]
@@ -407,6 +411,29 @@ def main():
         "rows": rows,
     }
     OUT_FILE.write_text(json.dumps(out, indent=2))
+
+    # Snapshot the proposed shorts (flagged) with their entry price, so we can later
+    # compare to the actual price and score whether the call was right (see eval_shorts.py).
+    HIST_DIR = BASE / "shorts_history"
+    HIST_DIR.mkdir(exist_ok=True)
+    picks_file = HIST_DIR / "short_picks.jsonl"
+    new_lines = [json.dumps({
+        "ts": out["generated_utc"], "coin": r["coin"], "data_src": r["data_src"],
+        "entry_price": r.get("price"), "short_score": r["short_score"],
+        "reversal_risk": r["reversal_risk"], "change24_at_call": round(r["change24"], 2),
+        "rsi": r.get("rsi"), "funding": r.get("funding"), "exchanges": r.get("exchanges"),
+    }) for r in rows if r.get("short") and r.get("price")]
+    if new_lines:
+        with open(picks_file, "a") as fh:
+            fh.write("\n".join(new_lines) + "\n")
+        keep = int(CFG.get("picks_keep", 20000))      # cap history (~1 week at 5-min cron)
+        try:
+            existing = picks_file.read_text().splitlines()
+            if len(existing) > keep:
+                picks_file.write_text("\n".join(existing[-keep:]) + "\n")
+        except OSError:
+            pass
+
     top = [r["coin"] for r in rows if r["short"]][:10]
     print(f"Wrote {OUT_FILE}: scanned {len(bases)} perps, {len(rows)} listed, "
           f"{out['count_short']} flagged SHORT, generated {out['generated_utc']}")
