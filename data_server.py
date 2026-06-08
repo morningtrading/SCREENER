@@ -584,6 +584,13 @@ a.btn.dl:hover{box-shadow:0 0 16px rgba(63,224,138,.4);}
 .navbtn .num{font-weight:800;color:var(--neon);letter-spacing:.5px;font-variant-numeric:tabular-nums;
   text-shadow:0 0 8px rgba(0,255,255,.5);}
 .navbtn.dl .num{color:#3fe08a;text-shadow:0 0 8px rgba(63,224,138,.5);}
+/* current page: button stays lit */
+.navbtn.active{color:#fff;border-color:var(--neon);background:rgba(0,255,255,.16);
+  box-shadow:0 0 18px rgba(0,255,255,.5),inset 0 0 14px rgba(0,255,255,.14);font-weight:600;}
+.navbtn.active .num{color:#fff;text-shadow:0 0 11px rgba(0,255,255,.95);}
+.navbtn.dl.active{border-color:#3fe08a;background:rgba(63,224,138,.16);
+  box-shadow:0 0 18px rgba(63,224,138,.5),inset 0 0 14px rgba(63,224,138,.14);}
+.navbtn.dl.active .num{color:#eafff4;text-shadow:0 0 11px rgba(63,224,138,.95);}
 h2{margin:18px 0 6px;text-shadow:0 0 10px rgba(0,255,255,.25);}
 .meta{color:#9aa3b6;font-size:13px;line-height:1.55;margin:6px 0 4px;}
 .meta b{color:#cfefff;}
@@ -761,11 +768,19 @@ def nav_bar(request: Request, token: str) -> str:
         ("Results", with_token("/results", token), ""),
         ("Raw JSON", with_token("/summary.json", token), ""),
     ]
-    links = "".join(
-        f'<a class="navbtn{cls}" href="{url}"><span class="num">-{i}-</span>{label}</a>'
-        for i, (label, url, cls) in enumerate(items, 1)
-    )
-    return f'<nav class="topnav">{links}</nav>'
+    try:
+        cur = request.url.path           # light up the button for the page we're on
+    except Exception:
+        cur = ""
+    parts = []
+    for i, (label, url, cls) in enumerate(items, 1):
+        active = " active" if url.split("?", 1)[0] == cur else ""
+        aria = ' aria-current="page"' if active else ""
+        parts.append(
+            f'<a class="navbtn{cls}{active}" href="{url}"{aria}>'
+            f'<span class="num">-{i}-</span>{label}</a>'
+        )
+    return f'<nav class="topnav">{"".join(parts)}</nav>'
 
 
 def human_size(n: Optional[int]) -> str:
