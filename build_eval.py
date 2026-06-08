@@ -128,6 +128,7 @@ def pnl_of(entry, price, side):
 
 def evaluate(path, side, now, horizon_h, grace_s):
     open_rows, settled_rows, series = [], [], {}
+    now_ms = int(now.timestamp() * 1000)
     for c, picks in coin_picks(path).items():
         for ep in split_episodes(picks, grace_s):     # each flagged run is its own position
             entry = ep[0]
@@ -141,6 +142,10 @@ def evaluate(path, side, now, horizon_h, grace_s):
             # next 15m close — which left just-flagged coins missing from the open board).
             start_ms = (int(entry_dt.timestamp() * 1000) // 900_000) * 900_000
             closes = kline_closes(c, src, start_ms)
+            # Drop future-dated candles: MEXC returns fabricated future slots for some
+            # commodity/CFD perps (USOIL, NICKEL, …), which otherwise stretch the equity
+            # curve weeks ahead and freeze exits on prices that don't exist yet.
+            closes = [(t, px) for t, px in closes if t <= now_ms]
             if not closes:
                 continue
             close_dt, reason = episode_close(ep, now, horizon_h, grace_s)
