@@ -15,13 +15,36 @@ elif [ -n "${SCREENER_VENV:-}" ] && [ -x "$SCREENER_VENV/bin/python" ]; then PY=
 else PY="python3"; fi
 HOST="${SCREENER_HOST:-permanent}"
 
+gen_of() { grep -o '"generated_utc": *"[^"]*"' "$1" 2>/dev/null | head -1 | cut -d'"' -f4; }
+
+status() {
+    echo "--------------------------------------------"
+    # Server (the dashboard)
+    if pgrep -f "uvicorn data_server:app --host 0.0.0.0 --port $PORT" >/dev/null 2>&1; then
+        pid=$(pgrep -f "uvicorn data_server:app --host 0.0.0.0 --port $PORT" | head -1)
+        echo "  Server      : UP   (pid $pid, port $PORT)"
+    else
+        echo "  Server      : DOWN"
+    fi
+    # Bot = the 5-min auto-refresh cron job
+    if crontab -l 2>/dev/null | grep -q 'refresh_momentum.sh'; then
+        last=$(grep '=== .* refresh ===' momentum_refresh.log 2>/dev/null | tail -1 | tr -d '=' | xargs 2>/dev/null)
+        echo "  Bot (cron)  : ON  (*/5 min)  last run: ${last:-never}"
+    else
+        echo "  Bot (cron)  : OFF (not installed)"
+    fi
+    # Data freshness + pick history
+    echo "  Momentum    : data $(gen_of momentum_ranking.json || echo '—')   picks $(wc -l < momentum_history/momentum_picks.jsonl 2>/dev/null || echo 0)"
+    echo "  Shorts      : data $(gen_of shorts_ranking.json   || echo '—')   picks $(wc -l < shorts_history/short_picks.jsonl 2>/dev/null   || echo 0)"
+    echo "--------------------------------------------"
+}
+
 urls() {
-    echo "  Landing : http://$HOST:$PORT/?token=$TOKEN"
-    echo "  Summary : http://$HOST:$PORT/summary?token=$TOKEN"
-    echo "  Binance ranking : http://$HOST:$PORT/binance-ranking?token=$TOKEN"
-    echo "  MEXC ranking    : http://$HOST:$PORT/mexc-ranking?token=$TOKEN"
-    echo "  Combined        : http://$HOST:$PORT/combined?token=$TOKEN"
-    echo "  Momentum        : http://$HOST:$PORT/momentum?token=$TOKEN"
+    echo "  Landing  : http://$HOST:$PORT/?token=$TOKEN"
+    echo "  Summary  : http://$HOST:$PORT/summary?token=$TOKEN"
+    echo "  Combined : http://$HOST:$PORT/combined?token=$TOKEN"
+    echo "  Momentum : http://$HOST:$PORT/momentum?token=$TOKEN"
+    echo "  Shorts   : http://$HOST:$PORT/shorts?token=$TOKEN"
 }
 
 while true; do
@@ -29,14 +52,16 @@ while true; do
     echo "============================================"
     echo "   SCREENER  (data dashboard)   port $PORT"
     echo "============================================"
+    status
     echo "  1) Start dashboard"
     echo "  2) Stop dashboard"
-    echo "  3) Status / health check"
-    echo "  4) Refresh FULL Binance ranking"
-    echo "  5) Refresh FULL MEXC ranking"
-    echo "  6) Refresh MOMENTUM (CMC trending × Binance)"
-    echo "  7) Show URLs (with token)"
-    echo "  8) Tail dashboard log"
+    echo "  3) Detailed status / health check"
+    echo "  4) Refresh momentum + shorts now"
+    echo "  5) Refresh Binance + MEXC rankings"
+    echo "  6) Evaluate SHORTS  (were we right?)"
+    echo "  7) Evaluate MOMENTUM (were we right?)"
+    echo "  8) Show URLs (with token)"
+    echo "  9) Tail dashboard log"
     echo "  0) Exit"
     echo "--------------------------------------------"
     read -rp "Choose: " c
@@ -44,11 +69,12 @@ while true; do
         1) ./start_screener.sh ;;
         2) ./stop_screener.sh ;;
         3) ./status_screener.sh ;;
-        4) "$PY" build_binance_ranking.py ;;
-        5) "$PY" build_mexc_ranking.py ;;
-        6) "$PY" build_momentum.py ;;
-        7) urls ;;
-        8) tail -n 30 -f screener.log ;;
+        4) "$PY" build_momentum.py && "$PY" build_shorts.py ;;
+        5) "$PY" build_binance_ranking.py && "$PY" build_mexc_ranking.py ;;
+        6) read -rp "Min age hours [0]: " a; "$PY" eval_shorts.py --min-age-hours "${a:-0}" ;;
+        7) read -rp "Min age hours [0]: " a; "$PY" eval_momentum.py --min-age-hours "${a:-0}" ;;
+        8) urls ;;
+        9) tail -n 30 -f screener.log ;;
         0) exit 0 ;;
         *) echo "Invalid choice" ;;
     esac
