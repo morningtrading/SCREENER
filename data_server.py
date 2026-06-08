@@ -702,6 +702,10 @@ td.down{color:#ff7a93;}
 .spark{vertical-align:middle;}
 .equity{display:block;width:100%;height:auto;background:rgba(0,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:8px;}
 .eqcap{font-size:11px;color:#7d8499;margin:2px 0 0;}
+.legend{font-size:11.5px;line-height:1.7;color:#9aa3b8;margin:2px 0 14px;padding:9px 13px;
+  background:rgba(0,255,255,.035);border:1px solid rgba(255,255,255,.08);border-radius:8px;}
+.legend b{color:#cfefff;font-weight:600;}
+.legend .sig,.legend .warn{vertical-align:middle;}
 /* auth-status pill */
 .authpill{display:inline-block;margin:8px 0 16px;padding:7px 14px;border-radius:999px;font-size:12.5px;
   background:rgba(0,255,255,.06);border:1px solid rgba(0,255,255,.28);color:#cfefff;}
@@ -1766,6 +1770,18 @@ once it reaches the <b>{horizon_txt}h</b> horizon or momentum flips off, whichev
 Open picks are the active board; settled picks are the realized record below.
 Evaluated {gen} UTC &middot; <b id="dataage">{age_txt}</b> min old
 <span class="muted">(auto-refreshes every 5 min)</span>.</p>
+<div class="legend">
+<b>Legend</b> &mdash;
+<b>Open</b>: still being flagged (tracks the live price). &nbsp;
+<b>Settled</b>: closed, P&amp;L frozen at the exit. &nbsp;
+<b>Age</b> = hours since the call; <b>Held</b> = hours the position stayed open.
+<br>Exit reason (settled rows):
+<span class="muted">&#9201; horizon</span> = reached the <b>{horizon_txt}h</b> max hold (still trending, just capped for scoring); &nbsp;
+<span class="muted">&#10007; off</span> = momentum flipped off &mdash; the screener stopped flagging it (no re-flag within the grace window).
+<br>Per-call tag:
+<span class="sig">EARLY</span> = the long fired the <b>early-detection</b> confluence at the call (the early leading-signal threshold); &nbsp;
+<span class="warn high">&#9888;</span> = the short had <b>reversal risk</b> at the call (oversold / crowded-short / bounce; a fainter icon = lower risk).
+</div>
 <div class="resgrid">
   <div><h3>Long equity</h3>{_equity_svg(data.get("longs", {}).get("equity"), "#3fe08a")}
     <p class="eqcap">Average P&amp;L across long picks while open at each 15m step (a pick drops out once it settles).</p></div>
