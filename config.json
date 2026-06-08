@@ -45,5 +45,35 @@
     "early_weight": 0.2,
 
     "regime_coins": ["BTC", "ETH", "HYPE", "ZEC"]
+  },
+  "shorts": {
+    "timeframes": ["1h", "2h", "4h"],
+    "weights": { "1h": 0.5, "2h": 0.3, "4h": 0.2, "recent": 0.12 },
+    "min_volume_usdt": 5000000,
+    "max_24h_change_pct": -1.0,
+    "scan_shortlist": 40,
+    "store_top": 30,
+    "roc_lookback_bars": 6,
+    "ema_fast": 9, "ema_slow": 21, "slope_bars": 3,
+    "klines_limit": 60,
+    "trend_down_factor": 0.3, "damp_floor": 0.2,
+    "max_extension_pct": 12.0,
+    "accel_weight": 0.2,
+    "min_score": 1.0,
+    "require_downtrend_alignment": true,
+    "recent_windows_min": [5, 15, 30, 45],
+    "sell_ratio_max": 0.45,
+    "rvol_recent_bars": 3, "rvol_base_bars": 20, "rvol_min": 1.8,
+    "accel_lookback": 6, "min_accel_pct": 0.2,
+    "breakdown_lookback": 24,
+    "oi_min_pct": 0.5,
+    "funding_min": 0.0,
+    "early_min_signals": 2, "early_weight": 0.2,
+    "rsi_period": 14, "rsi_oversold": 25.0,
+    "max_drawdown_ext": 12.0,
+    "funding_squeeze": -0.0005,
+    "bounce_pct": 1.5,
+    "capitulation_bar_pct": 6.0,
+    "regime_coins": ["BTC", "ETH", "HYPE", "ZEC"]
   }
 }

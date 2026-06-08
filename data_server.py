@@ -687,6 +687,14 @@ td.down{color:#ff7a93;}
 .btcregime.up{color:#3fe08a;border-color:rgba(63,224,138,.55);background:rgba(63,224,138,.1);}
 .btcregime.down{color:#ff7a93;border-color:rgba(255,90,110,.5);background:rgba(255,90,110,.07);}
 .btcregime.mixed{color:#bdfdff;border-color:rgba(0,255,255,.4);}
+/* shorts-specific */
+.chip.short{color:#ff5a6e;border-color:rgba(255,90,110,.6);background:rgba(255,90,110,.14);text-shadow:0 0 8px rgba(255,90,110,.4);}
+.warn{font-size:15px;cursor:help;filter:drop-shadow(0 0 5px rgba(255,179,0,.6));}
+.warn.high{opacity:1;}
+.warn.low{opacity:.55;font-size:13px;}
+.risktoggle{display:inline-flex;align-items:center;gap:8px;margin:0 0 14px;padding:7px 13px;border-radius:999px;
+  font-size:12.5px;color:#ffe2a6;background:rgba(255,179,0,.07);border:1px solid rgba(255,179,0,.32);cursor:pointer;user-select:none;}
+.risktoggle input{accent-color:#ffb300;width:15px;height:15px;cursor:pointer;}
 /* auth-status pill */
 .authpill{display:inline-block;margin:8px 0 16px;padding:7px 14px;border-radius:999px;font-size:12.5px;
   background:rgba(0,255,255,.06);border:1px solid rgba(0,255,255,.28);color:#cfefff;}
@@ -738,6 +746,7 @@ def nav_bar(request: Request, token: str) -> str:
         ("Data Summary", with_token("/summary", token), ""),
         ("Combined", with_token("/combined", token), ""),
         ("Momentum", with_token("/momentum", token), ""),
+        ("Shorts", with_token("/shorts", token), ""),
         ("Raw JSON", with_token("/summary.json", token), ""),
     ]
     links = "".join(
@@ -1431,6 +1440,182 @@ async def momentum_json(request: Request):
     if not MOMENTUM_FILE.exists():
         raise HTTPException(status_code=404, detail="Momentum data not generated yet.")
     return JSONResponse(json.loads(MOMENTUM_FILE.read_text()))
+
+
+# --- Endpoint: Shorts screener (weakest perps on MEXC / HL) ---
+SHORTS_FILE = Path(__file__).resolve().parent / "shorts_ranking.json"
+
+
+def _sell_cell(br) -> str:
+    """Aggressive-sell share (= 1 - taker-buy): green when sellers dominate (good for a short)."""
+    if br is None:
+        return "<td data-order='-1'>-</td>"
+    cls = "up" if br <= 0.45 else ("down" if br >= 0.55 else "")
+    return f"<td data-order='{1 - br}' class='{cls}'>{(1 - br) * 100:.0f}%</td>"
+
+
+def _rsi_cell(v) -> str:
+    if v is None:
+        return "<td data-order='-1'>-</td>"
+    cls = "down" if v < 30 else ""    # oversold = bounce caution
+    return f"<td data-order='{v}' class='{cls}'>{v:.0f}</td>"
+
+
+def _funding_cell(f) -> str:
+    if f is None:
+        return "<td data-order='-1e9'>-</td>"
+    cls = "down" if f < 0 else "up"   # negative funding = crowded short = caution
+    return f"<td data-order='{f}' class='{cls}'>{f * 100:+.3f}%</td>"
+
+
+def _short_breakdown_cell(r) -> str:
+    sigs = r.get("breakdown_signals") or []
+    if not sigs:
+        return "<td data-order='0'><span class='no'>&mdash;</span></td>"
+    labels = {
+        "sell": ("SELL", f"taker-sell {round((1 - (r.get('buy_ratio') or 0)) * 100)}%"),
+        "vol": ("VOL", f"rvol {r.get('rvol')}x"),
+        "accel": ("ACC&#9660;", f"1h accelerating down {r.get('accel_1h')}pp"),
+        "brk": ("BRK&#9660;", "new-low breakdown"),
+        "oi": ("OI&#9650;", f"OI {r.get('oi_change')}%"),
+        "fund": ("F", f"funding {r.get('funding')}"),
+    }
+    badges = "".join(f'<span class="sig" title="{labels.get(k, (k, k))[1]}">{labels.get(k, (k, k))[0]}</span>'
+                     for k in sigs)
+    return f"<td data-order='{len(sigs)}'>{badges}</td>"
+
+
+def _risk_icon(r) -> str:
+    lvl = r.get("reversal_risk", "none")
+    reasons = r.get("risk_reasons") or []
+    if lvl == "none" or not reasons:
+        return "<td data-order='0'><span class='no'>&mdash;</span></td>"
+    order = 2 if lvl == "high" else 1
+    return f"<td data-order='{order}'><span class=\"warn {lvl}\" title=\"{'; '.join(reasons)}\">&#9888;</span></td>"
+
+
+@app.get("/shorts", response_class=HTMLResponse)
+async def shorts_page(request: Request):
+    if not is_authenticated(request):
+        return login_redirect(request)
+    token = link_token(request)
+    home = with_token("/", token)
+    if not SHORTS_FILE.exists():
+        return (f"<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
+                f"<title>SCREENER &middot; Shorts</title>{DATA_PAGE_CSS}</head>"
+                f"<body><div class='wrap'>{neon_logo('Shorts — weakest perps')}"
+                f'<a href="{home}" class="btn">&#8962; Home</a>'
+                f'<h2>No shorts data yet</h2>'
+                f'<p class="meta">Run <code>python3 build_shorts.py</code> to generate it.</p>'
+                f"</div></body></html>")
+    data = json.loads(SHORTS_FILE.read_text())
+    cfg = data.get("config", {})
+    gen = data.get("generated_utc")
+    gen_ts = _gen_epoch(gen)
+    age_min = int(max(0, (datetime.now(timezone.utc).timestamp() - gen_ts) / 60)) if gen_ts else None
+    age_txt = str(age_min) if age_min is not None else "?"
+    rows_html = []
+    for r in data.get("rows", []):
+        is_short = r.get("short")
+        risk = r.get("reversal_risk", "none")
+        bg = "rgba(255,90,110,.10)" if is_short else "rgba(125,132,153,.04)"
+        sc = r.get("short_score")
+        score_cell = (f"<td data-order='{sc}'><b>{sc:.2f}</b></td>"
+                      if sc is not None else "<td data-order='-1e9'>-</td>")
+        roc = r.get("roc", {})
+        if is_short:
+            flag = '<span class="chip short">SHORT</span>'
+        elif sc is None:
+            flag = f'<span class="chip bad" title="{r.get("reason", "")}">n/a</span>'
+        else:
+            flag = f'<span class="chip bad" title="{r.get("reason", "")}">{r.get("reason", "no")}</span>'
+        chart = tradingview_link(r["coin"]) if r.get("data_src", "none") != "none" else "&middot;"
+        rec_order = sum(v for v in (r.get('recent') or {}).values() if v is not None)
+        rows_html.append(
+            f"<tr data-risk='{risk}' style='background:{bg}'>"
+            f"<td>{r.get('rank', '')}</td>"
+            f"<td>{coin_link(r['coin'], token)}</td>"
+            f"<td>{chart}</td>"
+            f"{score_cell}"
+            f"<td data-order='{rec_order:.3f}'>{_recent_dots(r.get('recent'))}</td>"
+            f"{_roc_cell(r.get('change24'))}"
+            f"{_sell_cell(r.get('buy_ratio'))}"
+            f"{_rvol_cell(r.get('rvol'))}"
+            f"{_short_breakdown_cell(r)}"
+            f"{_roc_cell(roc.get('1h'))}{_roc_cell(roc.get('2h'))}{_roc_cell(roc.get('4h'))}"
+            f"{_rsi_cell(r.get('rsi'))}"
+            f"{_funding_cell(r.get('funding'))}"
+            f"<td data-order='{len(r.get('exchanges') or [])}'>{_exch_badges(r.get('exchanges'))}</td>"
+            f"{_risk_icon(r)}"
+            f"<td data-order='{1 if is_short else 0}'>{flag}</td></tr>"
+        )
+    html = f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SCREENER &middot; Shorts</title>
+<link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
+{DATA_PAGE_CSS}
+</head><body><div class="wrap">
+{neon_logo("Shorts — weakest perps to short (MEXC / HL)")}
+{nav_bar(request, token)}
+{auth_status_html(request)}
+<h2>Top perps to short — weak, liquid, low reversal risk</h2>
+<p class="meta">Scanned {data.get('scanned')} MEXC + HL perps; the weakest with &ge;
+{cfg.get('min_volume_usdt', 0) / 1e6:.0f}M 24h volume are deep-scored on 1h/2h/4h
+(Binance when listed, else MEXC). <span class="chip short">SHORT</span> = strong weakness,
+1h falling, 4h downtrend confirmed. Breakdown badges:
+<span class="sig">SELL</span><span class="sig">VOL</span><span class="sig">ACC&#9660;</span><span class="sig">BRK&#9660;</span><span class="sig">OI&#9650;</span><span class="sig">F</span>.
+<b>{data.get('count_short')}</b> flagged. The <span class="warn high">&#9888;</span> marks
+<b>reversal risk</b> (oversold / crowded-short / bounce / capitulation) — info only; toggle below
+to filter it out.<br>
+generated {gen} UTC &middot; <b id="dataage">{age_txt}</b> min old
+<span class="muted">(auto-refreshes every 5 min)</span>.</p>
+{_regime_banner(data.get("regime"))}
+<label class="risktoggle"><input type="checkbox" id="hiderisk"> &#9888; Hide high reversal-risk (show only cleaner shorts)</label>
+<div class="searchbar">
+  <span class="sicon">&#128269;</span>
+  <input id="shortsearch" type="search" placeholder="Search coin, value…" autocomplete="off" autofocus>
+  <button id="searchbtn" class="sbtn" type="button">Search</button>
+  <button id="clearbtn" class="sbtn clear" type="button">Clear</button>
+</div>
+<table id="rank" class="display" style="width:100%">
+<thead><tr><th>#</th><th>Coin</th><th>Chart</th><th>Short</th><th>Recent<br>5·15·30·45m</th><th>24h%</th>
+<th>Sell%</th><th>RVOL</th><th>Breakdown</th><th>1h&nbsp;%</th><th>2h&nbsp;%</th><th>4h&nbsp;%</th>
+<th>RSI</th><th>Funding</th><th>Exch</th><th>&#9888;</th><th>SHORT</th></tr></thead>
+<tbody>
+{''.join(rows_html)}
+</tbody></table>
+<script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
+<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
+<script>$(document).ready(function(){{
+  var dt=$('#rank').DataTable({{"pageLength":10,"order":[[16,"desc"],[3,"desc"]],"dom":"lrtip",
+    "columnDefs":[{{"orderable":false,"searchable":false,"targets":[2]}}]}});
+  var hideRisk=false;
+  $.fn.dataTable.ext.search.push(function(settings,data,dataIndex){{
+    if(settings.nTable.id!=='rank') return true;
+    if(!hideRisk) return true;
+    return settings.aoData[dataIndex].nTr.getAttribute('data-risk')!=='high';
+  }});
+  var tg=document.getElementById('hiderisk');
+  tg.addEventListener('change',function(){{ hideRisk=tg.checked; dt.draw(); }});
+  var gts={int(gen_ts) if gen_ts else 0}, ageEl=document.getElementById('dataage');
+  if(gts && ageEl){{ function upd(){{ ageEl.textContent=Math.max(0,Math.floor((Date.now()/1000-gts)/60)); }} upd(); setInterval(upd,30000); }}
+  var box=document.getElementById('shortsearch');
+  function doSearch(){{ dt.search(box.value).draw(); }}
+  box.addEventListener('input', doSearch);
+  box.addEventListener('keydown', function(e){{ if(e.key==='Enter'){{ e.preventDefault(); doSearch(); }} }});
+  document.getElementById('searchbtn').addEventListener('click', doSearch);
+  document.getElementById('clearbtn').addEventListener('click', function(){{ box.value=''; doSearch(); box.focus(); }});
+}});</script>
+</div></body></html>"""
+    return html
+
+
+@app.get("/shorts.json")
+async def shorts_json(request: Request):
+    require_api_auth(request)
+    if not SHORTS_FILE.exists():
+        raise HTTPException(status_code=404, detail="Shorts data not generated yet.")
+    return JSONResponse(json.loads(SHORTS_FILE.read_text()))
 
 
 # --- Endpoint: Combined view — select on MEXC, backtest on Binance ---

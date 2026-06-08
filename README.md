@@ -144,6 +144,8 @@ once you have a session). Scripts can keep using the token or Basic auth.
 | `/combined` | **Trade-on-MEXC** selection view + Binance backtest-data (CSV) links side by side |
 | `/momentum` | **CoinMarketCap trending** coins scored on Binance 1h/2h/4h; green = real uptrend, not post-pump |
 | `/momentum.json` | Machine-readable momentum scores (the same data as `/momentum`) |
+| `/shorts` | Weakest **MEXC/HL** perps to short — weak + liquid + low reversal risk; ⚠️ flags squeeze/bounce risk |
+| `/shorts.json` | Machine-readable short scores (the same data as `/shorts`) |
 | `/binance-good-pairs.json` / `/mexc-good-pairs.json` | The "good" coins as a JSON pair list (download candidates) |
 | `/file/{name}` | Download a raw `.feather` file |
 | `/csv/{name}` | Download a `.feather` file converted to CSV on the fly |
@@ -267,6 +269,34 @@ Bump the `1h` weight for a faster signal; lower `max_extension_pct` to be strict
 chasing. Trending data comes from CMC's free public data-API by default; set
 `SCREENER_CMC_API_KEY` to use the official Pro API instead. Refresh from `./menu.sh`
 (option 6) or by re-running the script.
+
+## Shorts screener (weakest MEXC / HL perps)
+
+`build_shorts.py` is the short-side mirror of the momentum tab — it finds the **top perps to short**:
+genuinely weak, still liquid, with **low reversal risk**.
+
+```bash
+.venv/bin/python build_shorts.py    # writes shorts_ranking.json
+```
+
+It (1) scans the **whole MEXC (~890) + Hyperliquid (~230) perp universe** in two bulk calls for the
+weakest coins with decent 24h volume, (2) deep-scores a shortlist on **1h/2h/4h** (Binance futures when
+listed — best data + native 2h + OI/funding — else MEXC klines), and (3) scores **weakness** (the inverse
+of the momentum composite) plus **breakdown** leading signals (aggressive selling, volume surge, 1h
+accelerating down, new-low breakdown, OI rising into weakness, funding not crowded). A coin is flagged
+**SHORT** when it is strongly weak, 1h falling, and the **4h downtrend confirms**.
+
+**Reversal risk (info + toggle).** Per the request, capitulating coins are *kept* by default but marked
+with a **⚠️** icon (hover for the reasons): **oversold** (RSI / stretched far below the mean),
+**crowded short** (deeply negative funding = squeeze risk), a **recent bounce**, or a **capitulation
+candle**. A page toggle — *"Hide high reversal-risk"* — filters the high-risk ones out; with the table
+paged at 10, it always shows the **top 10 of the current view**.
+
+The same BTC/ETH/HYPE/ZEC regime banner sits on top, and it refreshes on the same 5-min cron. All
+thresholds live in `config.json → "shorts"` (volume floor, weakness weights, breakdown thresholds, and
+the reversal-risk thresholds: `rsi_oversold`, `funding_squeeze`, `bounce_pct`, `capitulation_bar_pct`, …).
+
+> Note: MEXC klines carry no taker-buy data, so the **SELL** signal only applies to Binance-scored coins.
 
 ## Note on ports
 

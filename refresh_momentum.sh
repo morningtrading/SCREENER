@@ -1,5 +1,7 @@
 #!/bin/bash
-# Regenerate the momentum ranking (CMC trending × Binance/MEXC/Hyperliquid).
+# Regenerate the momentum (long) and shorts rankings.
+#   momentum_ranking.json — CMC trending × Binance/MEXC/Hyperliquid
+#   shorts_ranking.json   — weakest MEXC/HL perps
 # Designed to be run from cron, e.g. every 5 minutes:
 #   */5 * * * * /home/titus/SCREENER/refresh_momentum.sh
 set -uo pipefail
@@ -16,3 +18,4 @@ else PY="python3"; fi
 # Timestamped line + script output, appended to a rotating-ish log.
 echo "=== $(date -u +%Y-%m-%dT%H:%M:%SZ) refresh ===" >> momentum_refresh.log
 "$PY" build_momentum.py >> momentum_refresh.log 2>&1
+"$PY" build_shorts.py   >> momentum_refresh.log 2>&1
