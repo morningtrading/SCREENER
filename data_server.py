@@ -1411,7 +1411,10 @@ async def momentum_page(request: Request):
     age_min = int(max(0, (datetime.now(timezone.utc).timestamp() - gen_ts) / 60)) if gen_ts else None
     age_txt = str(age_min) if age_min is not None else "?"
     rows_html = []
-    for r in data.get("rows", []):
+    # Show only confirmed UPTREND longs — rejected trending coins (incl. post-pump faders
+    # like a coin dropping now, score < min) stay in momentum_ranking.json but off the board.
+    long_rows = [r for r in data.get("rows", []) if r.get("momentum")]
+    for r in long_rows:
         mom = r.get("momentum")
         if r.get("market") == "none" or r.get("score") is None:
             bg = "rgba(125,132,153,.05)"
@@ -1471,7 +1474,8 @@ plus a small recent bucket ({w.get('recent')}) and a 5–15m acceleration term.
 NOT overextended (1h &le; {cfg.get('max_extension_pct')}% above its EMA{cfg.get('ema_slow')}),
 no single-bar spike (&le; {cfg.get('max_single_bar_pct')}%), 4h trend confirms, and
 no recent 15m dump (&gt; {cfg.get('max_recent_drop_pct')}%) — i.e.
-a genuine climb, <b>not a post-pump</b> top. <b>{data.get('count_momentum')}</b> qualify now.
+a genuine climb, <b>not a post-pump</b> top. <b>{data.get('count_momentum')}</b> qualify now &mdash;
+only these confirmed UPTRENDs are listed (rejected trending coins, incl. post-pump faders, are scored but hidden).
 Ext% = how far 1h price sits above its mean (high = stretched).
 Exchanges = listed on <span class="exch b">B</span>inance / <span class="exch m">M</span>EXC /
 <span class="exch hl">HL</span> Hyperliquid.
