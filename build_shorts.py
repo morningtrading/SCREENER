@@ -31,10 +31,10 @@ _DEFAULTS = {
     "shorts": {
         "timeframes": ["1h", "2h", "4h"],
         "weights": {"1h": 0.5, "2h": 0.3, "4h": 0.2, "recent": 0.12},
-        "min_volume_usdt": 5_000_000,   # decent 24h USDT volume to be shortable
-        "max_24h_change_pct": -1.0,     # candidate must already be down at least this much on 24h
-        "scan_shortlist": 40,           # how many weakest candidates to deep-score
-        "store_top": 30,                # rows kept in the JSON (page shows top 10, toggle backfills)
+        "min_volume_usdt": 2_000_000,   # decent 24h USDT volume to be shortable
+        "max_24h_change_pct": 0.0,      # candidate must be down on the day (deep score does the real work)
+        "scan_shortlist": 50,           # how many weakest candidates to deep-score
+        "store_top": 40,                # rows kept in the JSON (page shows top 10, pages through the rest)
         "roc_lookback_bars": 6,
         "ema_fast": 9, "ema_slow": 21, "slope_bars": 3,
         "klines_limit": 60,
