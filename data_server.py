@@ -1550,6 +1550,13 @@ def _funding_cell(f) -> str:
     return f"<td data-order='{f}' class='{cls}'>{f * 100:+.3f}%</td>"
 
 
+def _spread_cell(v) -> str:
+    """MEXC bid/ask spread % at the scan (None for HL-only coins, which skip the gate)."""
+    if v is None:
+        return "<td data-order='999' class='muted' title='no MEXC book — spread gate skipped'>&mdash;</td>"
+    return f"<td data-order='{v}'>{v:.3f}</td>"
+
+
 def _short_breakdown_cell(r) -> str:
     sigs = r.get("breakdown_signals") or []
     if not sigs:
@@ -1627,6 +1634,7 @@ async def shorts_page(request: Request):
             f"{_roc_cell(roc.get('1h'))}{_roc_cell(roc.get('2h'))}{_roc_cell(roc.get('4h'))}"
             f"{_rsi_cell(r.get('rsi'))}"
             f"{_funding_cell(r.get('funding'))}"
+            f"{_spread_cell(r.get('spread_pct'))}"
             f"<td data-order='{len(r.get('exchanges') or [])}'>{_exch_badges(r.get('exchanges'))}</td>"
             f"{_risk_icon(r)}"
             f"<td data-order='{1 if is_short else 0}'>{flag}</td></tr>"
@@ -1642,8 +1650,8 @@ async def shorts_page(request: Request):
 {auth_status_html(request)}
 <h2>Top perps to short — weak, liquid, low reversal risk</h2>
 <p class="meta">Scanned {data.get('scanned')} MEXC + HL perps; the weakest with &ge;
-{cfg.get('min_volume_usdt', 0) / 1e6:.0f}M 24h volume are deep-scored on 1h/2h/4h
-(Binance when listed, else MEXC). <span class="chip short">SHORT</span> = strong weakness,
+{cfg.get('min_volume_usdt', 0) / 1e6:.0f}M 24h volume <b>and MEXC spread &le; {data.get('max_spread_pct')}%</b>
+are deep-scored on 1h/2h/4h (Binance when listed, else MEXC). <span class="chip short">SHORT</span> = strong weakness,
 1h falling, 4h downtrend confirmed. Breakdown badges:
 <span class="sig">SELL</span><span class="sig">VOL</span><span class="sig">ACC&#9660;</span><span class="sig">BRK&#9660;</span><span class="sig">OI&#9650;</span><span class="sig">F</span>.
 <b>{data.get('count_short')}</b> flagged. The <span class="warn high">&#9888;</span> marks
@@ -1662,14 +1670,14 @@ generated {gen} UTC &middot; <b id="dataage">{age_txt}</b> min old
 <table id="rank" class="display" style="width:100%">
 <thead><tr><th>#</th><th>Coin</th><th>Chart</th><th>Short</th><th>Recent<br>5·15·30·45m</th><th>24h%</th>
 <th>Sell%</th><th>RVOL</th><th>Breakdown</th><th>1h&nbsp;%</th><th>2h&nbsp;%</th><th>4h&nbsp;%</th>
-<th>RSI</th><th>Funding</th><th>Exch</th><th>&#9888;</th><th>SHORT</th></tr></thead>
+<th>RSI</th><th>Funding</th><th>Spread&nbsp;%</th><th>Exch</th><th>&#9888;</th><th>SHORT</th></tr></thead>
 <tbody>
 {''.join(rows_html)}
 </tbody></table>
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
 <script>$(document).ready(function(){{
-  var dt=$('#rank').DataTable({{"pageLength":100,"order":[[16,"desc"],[3,"desc"]],"dom":"lrtip",
+  var dt=$('#rank').DataTable({{"pageLength":100,"order":[[17,"desc"],[3,"desc"]],"dom":"lrtip",
     "columnDefs":[{{"orderable":false,"searchable":false,"targets":[2]}}]}});
   var hideRisk=false;
   $.fn.dataTable.ext.search.push(function(settings,data,dataIndex){{

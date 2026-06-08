@@ -60,7 +60,10 @@ _DEFAULTS = {
         "capitulation_bar_pct": 6.0,    # single 1h bar down > this = capitulation (bounce-prone)
         "regime_coins": ["BTC", "ETH", "HYPE", "ZEC"],
         "picks_keep": 20000,            # max lines kept in shorts_history/short_picks.jsonl
-    }
+    },
+    # Shared liquidity thresholds (the same field the rankings / combined pages use). We reuse
+    # max_spread_pct here so a candidate's MEXC bid/ask spread must be tight enough to short.
+    "filters": {"min_volume_usdt": 1_000_000, "max_spread_pct": 0.10, "min_volatility_pct": 2.0},
 }
 
 
@@ -75,7 +78,9 @@ def load_config():
     return cfg
 
 
-CFG = load_config()["shorts"]
+_ALL = load_config()
+CFG = _ALL["shorts"]
+MAX_SPREAD_PCT = _ALL["filters"]["max_spread_pct"]   # gate shorts on MEXC bid/ask spread
 
 
 # ------------------------------------------------------------------- universe (bulk scans)
@@ -88,12 +93,18 @@ def mexc_universe():
             if not sym.endswith("_USDT"):
                 continue
             try:
+                # bid1/ask1 are in the same bulk ticker response (same fields the MEXC ranking
+                # uses) — derive the % spread so shorts can be gated on liquidity for free.
+                bid = float(c.get("bid1") or 0.0)
+                ask = float(c.get("ask1") or 0.0)
+                spread = (ask - bid) / ((ask + bid) / 2.0) * 100.0 if (bid > 0 and ask > 0 and ask >= bid) else None
                 out[sym.split("_")[0].upper()] = {
                     "change24": float(c["riseFallRate"]) * 100.0,
                     "vol24": float(c.get("amount24") or 0.0),
                     "funding": float(c.get("fundingRate")) if c.get("fundingRate") is not None else None,
                     "oi": float(c.get("holdVol") or 0.0),
                     "price": float(c["lastPrice"]),
+                    "spread_pct": round(spread, 5) if spread is not None else None,
                 }
             except (KeyError, ValueError, TypeError):
                 pass
@@ -358,12 +369,17 @@ def main():
         change = m["change24"] if m else h["change24"]
         funding = (m or {}).get("funding") if m else (h or {}).get("funding")
         price = m["price"] if m else h["price"]
+        spread_pct = m.get("spread_pct") if m else None   # MEXC bid/ask spread (None for HL-only)
         exchanges = (["mexc"] if m else []) + (["hl"] if h else []) + (["binance"] if b in perp else [])
         cands.append({"coin": b, "change24": change, "vol24": vol, "funding": funding,
-                      "price": price, "exchanges": exchanges})
+                      "price": price, "spread_pct": spread_pct, "exchanges": exchanges})
 
-    # decent volume + already weak; rank weakest first; deep-score the shortlist
-    pool = [c for c in cands if c["vol24"] >= CFG["min_volume_usdt"] and c["change24"] <= CFG["max_24h_change_pct"]]
+    # decent volume + already weak + tight spread; rank weakest first; deep-score the shortlist.
+    # The spread gate only applies when we know the MEXC spread (HL-only coins pass through).
+    pool = [c for c in cands
+            if c["vol24"] >= CFG["min_volume_usdt"]
+            and c["change24"] <= CFG["max_24h_change_pct"]
+            and (c["spread_pct"] is None or c["spread_pct"] <= MAX_SPREAD_PCT)]
     pool.sort(key=lambda c: c["change24"])
     pool = pool[: CFG["scan_shortlist"]]
 
@@ -404,6 +420,7 @@ def main():
     out = {
         "generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "config": CFG,
+        "max_spread_pct": MAX_SPREAD_PCT,
         "regime": regime,
         "total": len(rows),
         "count_short": sum(1 for r in rows if r["short"]),
