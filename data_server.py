@@ -9,6 +9,7 @@ Authentication (any one of these grants access):
 import os
 import sys
 import json
+import html
 import base64
 import hashlib
 import secrets
@@ -768,39 +769,69 @@ def neon_logo(subtitle: str) -> str:
             f'<p class="subt">{subtitle}</p>')
 
 
+# Navigation structure (fixed): (url path, default label, default 3-line tooltip).
+# The TEXT (label + tooltip lines) is editable without code via nav_tips.txt — see
+# load_nav_tips(). These defaults are the fallback when that file is missing/incomplete.
+NAV_ITEMS = [
+    ("/", "Home", ("Dashboard home", "Server, bot & data status", "Jump to any section")),
+    ("/summary", "Data Summary", ("Per-pair market screener", "Volume · spread · volatility filters", "The raw data table")),
+    ("/combined", "Combined", ("Select on MEXC, backtest on Binance", "Cross-exchange shortlist", "Spread & fee aware")),
+    ("/momentum", "Long", ("CMC trending × Binance 1h/2h/4h", "Coins in a real uptrend, not post-pump", "Early-detection leading signals")),
+    ("/shorts", "Shorts", ("Weak, liquid perps to short", "Downtrend score + reversal-risk flags", "Funding / OI aware")),
+    ("/results", "Results", ("Track record — were the calls right?", "Entry vs price · open + settled", "Equity curves & per-pick P&L")),
+    ("/summary.json", "Raw JSON", ("The summary data as JSON", "For scripts & API access", "Token-authenticated endpoint")),
+]
+NAV_TIPS_FILE = Path(os.environ.get("SCREENER_NAV_TIPS", str(Path(__file__).resolve().parent / "nav_tips.txt")))
+
+
+def load_nav_tips(path: Path) -> Dict[str, List[str]]:
+    """Parse the editable nav text file → {url_path: [label, line1, line2, line3]}.
+
+    Format: a "[/path]" header, then 4 text lines (label + 3 tooltip lines). Blank lines
+    and lines starting with '#' are ignored. Returns {} on any read error (defaults apply).
+    """
+    out: Dict[str, List[str]] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return out
+    key = None
+    for raw in lines:
+        s = raw.strip()
+        if not s or s.startswith("#"):
+            continue
+        if s.startswith("[") and s.endswith("]"):
+            key = s[1:-1].strip()
+            out[key] = []
+        elif key is not None:
+            out[key].append(s)
+    return out
+
+
 def nav_bar(request: Request, token: str) -> str:
     """The numbered top navigation, identical on every page.
 
-    Each item carries a 3-line description shown as a hover fly-by (the .tip span).
+    Each button's label and its 3-line hover fly-by come from nav_tips.txt (live-reloaded
+    on every request), falling back to the NAV_ITEMS defaults. All text is HTML-escaped, so
+    the file can contain plain '&', '<', '×', etc.
     """
-    # (label, url, cls, (tip line 1 [title], line 2, line 3))
-    items = [
-        ("Home", with_token("/", token), "",
-         ("Dashboard home", "Server, bot &amp; data status", "Jump to any section")),
-        ("Data Summary", with_token("/summary", token), "",
-         ("Per-pair market screener", "Volume &middot; spread &middot; volatility filters", "The raw data table")),
-        ("Combined", with_token("/combined", token), "",
-         ("Select on MEXC, backtest on Binance", "Cross-exchange shortlist", "Spread &amp; fee aware")),
-        ("Long", with_token("/momentum", token), "",
-         ("CMC trending &times; Binance 1h/2h/4h", "Coins in a real uptrend, not post-pump", "Early-detection leading signals")),
-        ("Shorts", with_token("/shorts", token), "",
-         ("Weak, liquid perps to short", "Downtrend score + reversal-risk flags", "Funding / OI aware")),
-        ("Results", with_token("/results", token), "",
-         ("Track record &mdash; were the calls right?", "Entry vs price &middot; open + settled", "Equity curves &amp; per-pick P&amp;L")),
-        ("Raw JSON", with_token("/summary.json", token), "",
-         ("The summary data as JSON", "For scripts &amp; API access", "Token-authenticated endpoint")),
-    ]
+    overrides = load_nav_tips(NAV_TIPS_FILE)
     try:
         cur = request.url.path           # light up the button for the page we're on
     except Exception:
         cur = ""
     parts = []
-    for i, (label, url, cls, tip) in enumerate(items, 1):
+    for i, (path, dlabel, dtips) in enumerate(NAV_ITEMS, 1):
+        ov = overrides.get(path, [])
+        label = html.escape(ov[0]) if len(ov) >= 1 and ov[0] else html.escape(dlabel)
+        tips = [html.escape(ov[j + 1]) if len(ov) >= j + 2 and ov[j + 1] else html.escape(dtips[j])
+                for j in range(3)]
+        url = with_token(path, token)
         active = " active" if url.split("?", 1)[0] == cur else ""
         aria = ' aria-current="page"' if active else ""
-        tip_html = f'<b>{tip[0]}</b><br>{tip[1]}<br>{tip[2]}'
+        tip_html = f'<b>{tips[0]}</b><br>{tips[1]}<br>{tips[2]}'
         parts.append(
-            f'<a class="navbtn{cls}{active}" href="{url}"{aria}>'
+            f'<a class="navbtn{active}" href="{url}"{aria}>'
             f'<span class="num">-{i}-</span>{label}'
             f'<span class="tip" role="tooltip">{tip_html}</span></a>'
         )

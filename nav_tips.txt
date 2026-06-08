@@ -1,0 +1,60 @@
+# ============================================================
+#  SCREENER — navigation buttons & hover tooltips
+# ============================================================
+#  Edit the wording below. Each button is ONE block of 4 text lines:
+#
+#      [/url-path]      <- which button this is — DO NOT change this line
+#      Button label     <- the text shown on the button
+#      Tooltip line 1    <- bold title (top line of the fly-by)
+#      Tooltip line 2
+#      Tooltip line 3
+#
+#  Rules:
+#    • Keep exactly 4 text lines per block (label + 3 tooltip lines).
+#    • Lines starting with #  and blank lines are ignored.
+#    • Type symbols normally —  &  <  >  ×  ·  —  €  etc. are handled for you.
+#    • Changes show on the NEXT page refresh — no restart needed.
+#    • If this file is missing or a block is removed, the built-in text is used.
+# ============================================================
+
+[/]
+Home
+Dashboard home
+Server, bot & data status
+Jump to any section
+
+[/summary]
+Data Summary
+Per-pair market screener
+Volume · spread · volatility filters
+The raw data table
+
+[/combined]
+Combined
+Select on MEXC, backtest on Binance
+Cross-exchange shortlist
+Spread & fee aware
+
+[/momentum]
+Long
+CMC trending × Binance 1h/2h/4h
+Coins in a real uptrend, not post-pump
+Early-detection leading signals
+
+[/shorts]
+Shorts
+Weak, liquid perps to short
+Downtrend score + reversal-risk flags
+Funding / OI aware
+
+[/results]
+Results
+Track record — were the calls right?
+Entry vs price · open + settled
+Equity curves & per-pick P&L
+
+[/summary.json]
+Raw JSON
+The summary data as JSON
+For scripts & API access
+Token-authenticated endpoint
