@@ -1683,38 +1683,49 @@ def _equity_svg(points, color) -> str:
             f'<polyline fill="none" stroke="{color}" stroke-width="1.7" points="{line_pts}"/>{end}</svg>')
 
 
-def _eval_table(d, side, token) -> str:
-    label = "Longs &mdash; momentum picks" if side == "long" else "Shorts picks"
+def _eval_table(d, side, token, settled=False) -> str:
+    kind = "Longs &mdash; momentum picks" if side == "long" else "Shorts picks"
+    label = f"{kind} &middot; {'settled' if settled else 'open'}"
     moved = "rose" if side == "long" else "fell"
     n, w, avg = d.get("count", 0), d.get("wins", 0), d.get("avg", 0)
     if n == 0:
-        return f'<h3>{label}</h3><p class="meta">No {side} picks logged yet — they appear once the screener flags some.</p>'
+        none_txt = ("No settled picks yet — they move here once they hit the horizon or momentum flips off."
+                    if settled else
+                    f"No open {side} picks right now — they show here while the screener is still flagging them.")
+        return f'<h3>{label}</h3><p class="meta">{none_txt}</p>'
     pct = w / n * 100
     chip = "good" if pct >= 50 else "bad"
     summary = (f'<span class="chip {chip}">{w}/{n} right &middot; {pct:.0f}%</span> '
                f'&nbsp;avg P&amp;L {avg:+.2f}% <span class="muted">(right = price {moved} since the call)</span>')
+    time_hdr = "Held&nbsp;h" if settled else "Age&nbsp;h"
+    price_hdr = "Exit" if settled else "Now"
     trs = []
     for r in d.get("rows", []):
         pnl = r["pnl"]
         cls = "up" if pnl > 0 else ("down" if pnl < 0 else "")
         x = r.get("extra", "")
+        tags = []
         if side == "short" and x and x != "none":
-            extra = f'<span class="warn {x}" title="{x} reversal risk at call">&#9888;</span>'
+            tags.append(f'<span class="warn {x}" title="{x} reversal risk at call">&#9888;</span>')
         elif side == "long" and x == "early":
-            extra = '<span class="sig">EARLY</span>'
-        else:
-            extra = ""
+            tags.append('<span class="sig">EARLY</span>')
+        if settled:
+            horizon = r.get("close_reason") == "horizon"
+            why = "reached the horizon" if horizon else "momentum flipped off"
+            tags.append(f'<span class="muted" title="closed: {why}">{"&#9201; horizon" if horizon else "&#10007; off"}</span>')
+        tval = r.get("held_hours" if settled else "age_hours", 0.0)
         trs.append(
             f"<tr><td>{coin_link(r['coin'], token)}</td>"
-            f"<td data-order='{r['age_hours']}'>{r['age_hours']:.1f}</td>"
+            f"<td data-order='{tval}'>{tval:.1f}</td>"
             f"<td>{r['entry']:.6g}</td>"
             f"<td>{r['now']:.6g}</td>"
             f"<td data-order='{pnl}' class='{cls}'><b>{pnl:+.2f}%</b></td>"
             f"<td>{_sparkline(r.get('spark') or [])}</td>"
-            f"<td>{extra}</td></tr>")
+            f"<td>{' '.join(tags)}</td></tr>")
+    tid = f"res{side}{'settled' if settled else ''}"
     return (f'<h3>{label}</h3><p class="meta">{summary}</p>'
-            f'<table id="res{side}" class="display" style="width:100%">'
-            f'<thead><tr><th>Coin</th><th>Age&nbsp;h</th><th>Entry</th><th>Now</th><th>P&amp;L&nbsp;%</th>'
+            f'<table id="{tid}" class="display" style="width:100%">'
+            f'<thead><tr><th>Coin</th><th>{time_hdr}</th><th>Entry</th><th>{price_hdr}</th><th>P&amp;L&nbsp;%</th>'
             f'<th>Since call</th><th></th></tr></thead>'
             f'<tbody>{"".join(trs)}</tbody></table>')
 
@@ -1738,6 +1749,7 @@ async def results_page(request: Request):
     gen_ts = _gen_epoch(gen)
     age_min = int(max(0, (datetime.now(timezone.utc).timestamp() - gen_ts) / 60)) if gen_ts else None
     age_txt = str(age_min) if age_min is not None else "?"
+    horizon_txt = f"{data.get('horizon_hours', 4):g}"
     html = f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SCREENER &middot; Results</title>
@@ -1747,25 +1759,32 @@ async def results_page(request: Request):
 {neon_logo("Results — were our calls right?")}
 {nav_bar(request, token)}
 {auth_status_html(request)}
-<h2>Track record — entry price vs live price</h2>
-<p class="meta">Each coin's <b>first</b> flag is the entry; P&amp;L compares it to the current price.
-Longer <b>Age</b> = more time to play out (fresh picks near 0% are just noise).
+<h2>Track record — entry price vs price since the call</h2>
+<p class="meta">Each coin's <b>first</b> flag is the entry. A pick stays <b>open</b> while the screener
+keeps flagging it and tracks the live price; it <b>settles</b> — P&amp;L frozen at the close price —
+once it reaches the <b>{horizon_txt}h</b> horizon or momentum flips off, whichever comes first.
+Open picks are the active board; settled picks are the realized record below.
 Evaluated {gen} UTC &middot; <b id="dataage">{age_txt}</b> min old
 <span class="muted">(auto-refreshes every 5 min)</span>.</p>
 <div class="resgrid">
   <div><h3>Long equity</h3>{_equity_svg(data.get("longs", {}).get("equity"), "#3fe08a")}
-    <p class="eqcap">Average P&amp;L across all open long picks at each 15m step (equal weight, since each call).</p></div>
+    <p class="eqcap">Average P&amp;L across long picks while open at each 15m step (a pick drops out once it settles).</p></div>
   <div><h3>Short equity</h3>{_equity_svg(data.get("shorts", {}).get("equity"), "#ff7a93")}
-    <p class="eqcap">Average P&amp;L across all open short picks at each 15m step (equal weight, since each call).</p></div>
+    <p class="eqcap">Average P&amp;L across short picks while open at each 15m step (a pick drops out once it settles).</p></div>
 </div>
 <div class="resgrid">
   <div>{_eval_table(data.get("longs", {}), "long", token)}</div>
   <div>{_eval_table(data.get("shorts", {}), "short", token)}</div>
 </div>
+<h2 style="margin-top:26px">Settled — closed at the {horizon_txt}h horizon or when momentum flipped off</h2>
+<div class="resgrid">
+  <div>{_eval_table(data.get("longs", {}).get("settled", {}), "long", token, settled=True)}</div>
+  <div>{_eval_table(data.get("shorts", {}).get("settled", {}), "short", token, settled=True)}</div>
+</div>
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
 <script>$(document).ready(function(){{
-  ['reslong','resshort'].forEach(function(id){{
+  ['reslong','resshort','reslongsettled','resshortsettled'].forEach(function(id){{
     var el=document.getElementById(id);
     if(el) $('#'+id).DataTable({{"paging":false,"dom":"t","order":[[4,"desc"]],
       "columnDefs":[{{"orderable":false,"searchable":false,"targets":[5]}}]}});

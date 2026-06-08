@@ -47,6 +47,10 @@
     "regime_coins": ["BTC", "ETH", "HYPE", "ZEC"],
     "picks_keep": 20000
   },
+  "eval": {
+    "horizon_hours": 4.0,
+    "flip_grace_min": 15
+  },
   "shorts": {
     "timeframes": ["1h", "2h", "4h"],
     "weights": { "1h": 0.5, "2h": 0.3, "4h": 0.2, "recent": 0.12 },
