@@ -763,7 +763,7 @@ def nav_bar(request: Request, token: str) -> str:
         ("Home", with_token("/", token), ""),
         ("Data Summary", with_token("/summary", token), ""),
         ("Combined", with_token("/combined", token), ""),
-        ("Momentum", with_token("/momentum", token), ""),
+        ("Long", with_token("/momentum", token), ""),
         ("Shorts", with_token("/shorts", token), ""),
         ("Results", with_token("/results", token), ""),
         ("Raw JSON", with_token("/summary.json", token), ""),
