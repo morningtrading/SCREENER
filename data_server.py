@@ -576,7 +576,7 @@ a.btn.dl:hover{box-shadow:0 0 16px rgba(63,224,138,.4);}
 /* numbered top navigation (repeated on every page) */
 .topnav{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 16px;padding:8px 10px;border:1px solid rgba(0,255,255,.18);
   border-radius:12px;background:var(--card);backdrop-filter:blur(8px);box-shadow:0 0 22px rgba(0,255,255,.06);}
-.navbtn{display:inline-flex;align-items:center;gap:7px;padding:7px 14px;border-radius:9px;text-decoration:none;
+.navbtn{position:relative;display:inline-flex;align-items:center;gap:7px;padding:7px 14px;border-radius:9px;text-decoration:none;
   font-size:13px;color:#cfefff;border:1px solid rgba(0,255,255,.22);background:rgba(255,255,255,.03);transition:.16s;}
 .navbtn:hover{border-color:var(--neon);box-shadow:0 0 14px rgba(0,255,255,.3);color:#fff;}
 .navbtn.dl{border-color:rgba(63,224,138,.4);color:#9bf3c2;}
@@ -591,6 +591,17 @@ a.btn.dl:hover{box-shadow:0 0 16px rgba(63,224,138,.4);}
 .navbtn.dl.active{border-color:#3fe08a;background:rgba(63,224,138,.16);
   box-shadow:0 0 18px rgba(63,224,138,.5),inset 0 0 14px rgba(63,224,138,.14);}
 .navbtn.dl.active .num{color:#eafff4;text-shadow:0 0 11px rgba(63,224,138,.95);}
+/* hover fly-by: 3-line description per button */
+.navbtn .tip{position:absolute;top:calc(100% + 9px);left:0;z-index:60;width:max-content;max-width:250px;
+  padding:9px 12px;border-radius:9px;font-size:11.5px;line-height:1.55;font-weight:400;letter-spacing:0;
+  color:#bfe9ff;text-align:left;white-space:normal;background:rgba(8,14,24,.97);border:1px solid var(--neon);
+  box-shadow:0 0 20px rgba(0,255,255,.4);opacity:0;visibility:hidden;transform:translateY(-5px);
+  transition:opacity .15s,transform .15s;pointer-events:none;}
+.navbtn .tip b{display:block;margin-bottom:2px;color:#fff;font-weight:700;font-size:12px;text-shadow:0 0 8px rgba(0,255,255,.5);}
+.navbtn .tip::before{content:"";position:absolute;bottom:100%;left:16px;border:6px solid transparent;border-bottom-color:var(--neon);}
+.navbtn:hover .tip,.navbtn:focus-visible .tip{opacity:1;visibility:visible;transform:translateY(0);}
+.navbtn.dl .tip{border-color:#3fe08a;box-shadow:0 0 20px rgba(63,224,138,.4);}
+.navbtn.dl .tip::before{border-bottom-color:#3fe08a;}
 h2{margin:18px 0 6px;text-shadow:0 0 10px rgba(0,255,255,.25);}
 .meta{color:#9aa3b6;font-size:13px;line-height:1.55;margin:6px 0 4px;}
 .meta b{color:#cfefff;}
@@ -758,27 +769,40 @@ def neon_logo(subtitle: str) -> str:
 
 
 def nav_bar(request: Request, token: str) -> str:
-    """The numbered top navigation, identical on every page."""
+    """The numbered top navigation, identical on every page.
+
+    Each item carries a 3-line description shown as a hover fly-by (the .tip span).
+    """
+    # (label, url, cls, (tip line 1 [title], line 2, line 3))
     items = [
-        ("Home", with_token("/", token), ""),
-        ("Data Summary", with_token("/summary", token), ""),
-        ("Combined", with_token("/combined", token), ""),
-        ("Long", with_token("/momentum", token), ""),
-        ("Shorts", with_token("/shorts", token), ""),
-        ("Results", with_token("/results", token), ""),
-        ("Raw JSON", with_token("/summary.json", token), ""),
+        ("Home", with_token("/", token), "",
+         ("Dashboard home", "Server, bot &amp; data status", "Jump to any section")),
+        ("Data Summary", with_token("/summary", token), "",
+         ("Per-pair market screener", "Volume &middot; spread &middot; volatility filters", "The raw data table")),
+        ("Combined", with_token("/combined", token), "",
+         ("Select on MEXC, backtest on Binance", "Cross-exchange shortlist", "Spread &amp; fee aware")),
+        ("Long", with_token("/momentum", token), "",
+         ("CMC trending &times; Binance 1h/2h/4h", "Coins in a real uptrend, not post-pump", "Early-detection leading signals")),
+        ("Shorts", with_token("/shorts", token), "",
+         ("Weak, liquid perps to short", "Downtrend score + reversal-risk flags", "Funding / OI aware")),
+        ("Results", with_token("/results", token), "",
+         ("Track record &mdash; were the calls right?", "Entry vs price &middot; open + settled", "Equity curves &amp; per-pick P&amp;L")),
+        ("Raw JSON", with_token("/summary.json", token), "",
+         ("The summary data as JSON", "For scripts &amp; API access", "Token-authenticated endpoint")),
     ]
     try:
         cur = request.url.path           # light up the button for the page we're on
     except Exception:
         cur = ""
     parts = []
-    for i, (label, url, cls) in enumerate(items, 1):
+    for i, (label, url, cls, tip) in enumerate(items, 1):
         active = " active" if url.split("?", 1)[0] == cur else ""
         aria = ' aria-current="page"' if active else ""
+        tip_html = f'<b>{tip[0]}</b><br>{tip[1]}<br>{tip[2]}'
         parts.append(
             f'<a class="navbtn{cls}{active}" href="{url}"{aria}>'
-            f'<span class="num">-{i}-</span>{label}</a>'
+            f'<span class="num">-{i}-</span>{label}'
+            f'<span class="tip" role="tooltip">{tip_html}</span></a>'
         )
     return f'<nav class="topnav">{"".join(parts)}</nav>'
 
