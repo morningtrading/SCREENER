@@ -57,8 +57,8 @@ while true; do
     echo "  1) Start dashboard"
     echo "  2) Stop dashboard"
     echo "  3) Detailed status / health check"
-    echo "  4) Refresh momentum + shorts now"
-    echo "  5) Refresh Binance + MEXC rankings"
+    echo "  4) GO_LONG  — refresh long (momentum) picks"
+    echo "  5) GO_SHORT — refresh short picks"
     echo "  6) Evaluate SHORTS  (were we right?)"
     echo "  7) Evaluate MOMENTUM (were we right?)"
     echo "  8) Show URLs (with token)"
@@ -70,8 +70,8 @@ while true; do
         1) ./start_screener.sh ;;
         2) ./stop_screener.sh ;;
         3) ./status_screener.sh ;;
-        4) "$PY" build_momentum.py && "$PY" build_shorts.py ;;
-        5) "$PY" build_binance_ranking.py && "$PY" build_mexc_ranking.py ;;
+        4) "$PY" build_momentum.py ;;
+        5) "$PY" build_shorts.py ;;
         6) read -rp "Min age hours [0]: " a; "$PY" eval_shorts.py --min-age-hours "${a:-0}" ;;
         7) read -rp "Min age hours [0]: " a; "$PY" eval_momentum.py --min-age-hours "${a:-0}" ;;
         8) urls ;;
