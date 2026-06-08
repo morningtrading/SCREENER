@@ -1652,9 +1652,10 @@ async def shorts_page(request: Request):
 {nav_bar(request, token)}
 {auth_status_html(request)}
 <h2>Top perps to short — weak, liquid, low reversal risk</h2>
-<p class="meta">Scanned {data.get('scanned')} MEXC + HL perps; the weakest with &ge;
-{cfg.get('min_volume_usdt', 0) / 1e6:.0f}M 24h volume <b>and MEXC spread &le; {data.get('max_spread_pct')}%</b>
-are deep-scored on 1h/2h/4h (Binance when listed, else MEXC). <span class="chip short">SHORT</span> = strong weakness,
+<p class="meta">Scanned {data.get('scanned')} MEXC + HL perps; those most <b>pulled back from their 24h high</b>
+(with &ge; {cfg.get('min_volume_usdt', 0) / 1e6:.0f}M 24h volume <b>and MEXC spread &le; {data.get('max_spread_pct')}%</b>)
+are deep-scored on 1h/2h/4h (Binance when listed, else MEXC) — catches coins dropping <i>now</i> even if
+still green on the day. <span class="chip short">SHORT</span> = strong weakness,
 1h falling, 4h downtrend confirmed. Breakdown badges:
 <span class="sig">SELL</span><span class="sig">VOL</span><span class="sig">ACC&#9660;</span><span class="sig">BRK&#9660;</span><span class="sig">OI&#9650;</span><span class="sig">F</span>.
 <b>{data.get('count_short')}</b> flagged &mdash; only these confirmed shorts are listed

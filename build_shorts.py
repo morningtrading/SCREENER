@@ -98,13 +98,20 @@ def mexc_universe():
                 bid = float(c.get("bid1") or 0.0)
                 ask = float(c.get("ask1") or 0.0)
                 spread = (ask - bid) / ((ask + bid) / 2.0) * 100.0 if (bid > 0 and ask > 0 and ask >= bid) else None
+                last = float(c["lastPrice"])
+                # Drawdown from the 24h high (<= 0): how far price has pulled back. Captures
+                # "weak right now" even when a coin is still green on net 24h change — which the
+                # old 24h-change gate missed (a recent drop on a coin that had pumped earlier).
+                hi = float(c.get("high24Price") or 0.0)
+                drawdown = (last / hi - 1.0) * 100.0 if (hi > 0 and last > 0) else None
                 out[sym.split("_")[0].upper()] = {
                     "change24": float(c["riseFallRate"]) * 100.0,
                     "vol24": float(c.get("amount24") or 0.0),
                     "funding": float(c.get("fundingRate")) if c.get("fundingRate") is not None else None,
                     "oi": float(c.get("holdVol") or 0.0),
-                    "price": float(c["lastPrice"]),
+                    "price": last,
                     "spread_pct": round(spread, 5) if spread is not None else None,
+                    "drawdown_pct": round(drawdown, 3) if drawdown is not None else None,
                 }
             except (KeyError, ValueError, TypeError):
                 pass
@@ -369,18 +376,23 @@ def main():
         change = m["change24"] if m else h["change24"]
         funding = (m or {}).get("funding") if m else (h or {}).get("funding")
         price = m["price"] if m else h["price"]
-        spread_pct = m.get("spread_pct") if m else None   # MEXC bid/ask spread (None for HL-only)
+        spread_pct = m.get("spread_pct") if m else None     # MEXC bid/ask spread (None for HL-only)
+        drawdown_pct = m.get("drawdown_pct") if m else None  # pullback from 24h high (None for HL-only)
+        # Weakness axis for selection: how far below the 24h high (MEXC), else fall back to 24h
+        # change (HL-only). More negative = weaker right now → deep-score it.
+        weakness = drawdown_pct if drawdown_pct is not None else change
         exchanges = (["mexc"] if m else []) + (["hl"] if h else []) + (["binance"] if b in perp else [])
         cands.append({"coin": b, "change24": change, "vol24": vol, "funding": funding,
-                      "price": price, "spread_pct": spread_pct, "exchanges": exchanges})
+                      "price": price, "spread_pct": spread_pct, "drawdown_pct": drawdown_pct,
+                      "weakness": weakness, "exchanges": exchanges})
 
-    # decent volume + already weak + tight spread; rank weakest first; deep-score the shortlist.
-    # The spread gate only applies when we know the MEXC spread (HL-only coins pass through).
+    # Liquid enough (volume + tight spread), then rank by weakness — pullback from the 24h high,
+    # NOT net 24h change — so coins dropping NOW are scored even if still green on the day.
+    # The spread gate only applies when the MEXC spread is known (HL-only coins pass through).
     pool = [c for c in cands
             if c["vol24"] >= CFG["min_volume_usdt"]
-            and c["change24"] <= CFG["max_24h_change_pct"]
             and (c["spread_pct"] is None or c["spread_pct"] <= MAX_SPREAD_PCT)]
-    pool.sort(key=lambda c: c["change24"])
+    pool.sort(key=lambda c: c["weakness"] if c["weakness"] is not None else 0.0)
     pool = pool[: CFG["scan_shortlist"]]
 
     rows = []
