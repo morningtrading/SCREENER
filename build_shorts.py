@@ -24,7 +24,13 @@ BASE = Path(__file__).resolve().parent
 OUT_FILE = BASE / "shorts_ranking.json"
 MEXC_TICKER = "https://contract.mexc.com/api/v1/contract/ticker"
 MEXC_KLINE = "https://contract.mexc.com/api/v1/contract/kline"
+MEXC_DETAIL = "https://contract.mexc.com/api/v1/contract/detail"
 TIMEOUT, UA = bm.TIMEOUT, bm.UA
+
+# MEXC lists non-crypto CFD perps (stocks, forex, commodities, metals, indices) tagged by
+# "trade zone" in conceptPlate. We exclude these from the crypto shorts universe — their klines
+# are non-crypto and MEXC even returns fabricated future candles for some of them.
+EXCLUDE_ZONES = ("tradfi", "commodit", "stock", "metals", "forex", "preipo", "premarket")
 
 CONFIG_FILE = Path(os.environ.get("SCREENER_CONFIG", str(BASE / "config.json")))
 _DEFAULTS = {
@@ -84,6 +90,26 @@ MAX_SPREAD_PCT = _ALL["filters"]["max_spread_pct"]   # gate shorts on MEXC bid/a
 
 
 # ------------------------------------------------------------------- universe (bulk scans)
+def commodity_bases():
+    """Set of bases for MEXC non-crypto CFD perps (stocks/forex/commodities/metals/indices).
+
+    Identified by EXCLUDE_ZONES tags in each contract's conceptPlate (one bulk detail call).
+    Keyed by the symbol's base (same as mexc_universe), e.g. USOIL, METASTOCK, NICKEL, EUR.
+    """
+    try:
+        out = set()
+        for c in bm.get_json(MEXC_DETAIL).get("data", []):
+            sym = c.get("symbol", "")
+            if not sym.endswith("_USDT"):
+                continue
+            zones = [str(z).lower() for z in (c.get("conceptPlate") or [])]
+            if any(bad in z for z in zones for bad in EXCLUDE_ZONES):
+                out.add(sym.split("_")[0].upper())
+        return out
+    except Exception:
+        return set()
+
+
 def mexc_universe():
     """base -> {change24%, vol24 USDT, funding, oi} for every MEXC USDT perp (one call)."""
     out = {}
@@ -366,8 +392,9 @@ def main():
     mexc = mexc_universe()
     hl = hl_universe()
     perp = bm.futures_perp_bases()
+    excluded = commodity_bases()   # MEXC stock/forex/commodity CFD perps — not crypto
 
-    bases = set(mexc) | set(hl)
+    bases = (set(mexc) | set(hl)) - excluded
     cands = []
     for b in bases:
         m, h = mexc.get(b), hl.get(b)
@@ -464,8 +491,8 @@ def main():
             pass
 
     top = [r["coin"] for r in rows if r["short"]][:10]
-    print(f"Wrote {OUT_FILE}: scanned {len(bases)} perps, {len(rows)} listed, "
-          f"{out['count_short']} flagged SHORT, generated {out['generated_utc']}")
+    print(f"Wrote {OUT_FILE}: scanned {len(bases)} perps ({len(excluded)} non-crypto CFDs excluded), "
+          f"{len(rows)} listed, {out['count_short']} flagged SHORT, generated {out['generated_utc']}")
     print(f"Top shorts: {', '.join(top) if top else '(none)'}")
 
 
