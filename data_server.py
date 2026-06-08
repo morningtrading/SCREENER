@@ -1604,7 +1604,10 @@ async def shorts_page(request: Request):
     age_min = int(max(0, (datetime.now(timezone.utc).timestamp() - gen_ts) / 60)) if gen_ts else None
     age_txt = str(age_min) if age_min is not None else "?"
     rows_html = []
-    for r in data.get("rows", []):
+    # Show only confirmed SHORTs — rejected near-misses (incl. coins that are actually
+    # rising, like a bounce that scored < min) are kept in the JSON but not on the board.
+    short_rows = [r for r in data.get("rows", []) if r.get("short")]
+    for r in short_rows:
         is_short = r.get("short")
         risk = r.get("reversal_risk", "none")
         bg = "rgba(255,90,110,.10)" if is_short else "rgba(125,132,153,.04)"
@@ -1654,7 +1657,9 @@ async def shorts_page(request: Request):
 are deep-scored on 1h/2h/4h (Binance when listed, else MEXC). <span class="chip short">SHORT</span> = strong weakness,
 1h falling, 4h downtrend confirmed. Breakdown badges:
 <span class="sig">SELL</span><span class="sig">VOL</span><span class="sig">ACC&#9660;</span><span class="sig">BRK&#9660;</span><span class="sig">OI&#9650;</span><span class="sig">F</span>.
-<b>{data.get('count_short')}</b> flagged. The <span class="warn high">&#9888;</span> marks
+<b>{data.get('count_short')}</b> flagged &mdash; only these confirmed shorts are listed
+(rejected near-misses, incl. coins that have since bounced, are scored but hidden).
+The <span class="warn high">&#9888;</span> marks
 <b>reversal risk</b> (oversold / crowded-short / bounce / capitulation) — info only; toggle below
 to filter it out.<br>
 generated {gen} UTC &middot; <b id="dataage">{age_txt}</b> min old
