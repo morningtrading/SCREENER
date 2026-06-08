@@ -699,6 +699,9 @@ td.down{color:#ff7a93;}
 .resgrid{display:grid;grid-template-columns:1fr 1fr;gap:28px;align-items:start;margin-top:6px;}
 @media(max-width:1100px){.resgrid{grid-template-columns:1fr;}}
 .resgrid h3{margin:0 0 4px;color:#cfefff;font-size:16px;letter-spacing:.5px;}
+.spark{vertical-align:middle;}
+.equity{display:block;width:100%;height:auto;background:rgba(0,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:8px;}
+.eqcap{font-size:11px;color:#7d8499;margin:2px 0 0;}
 /* auth-status pill */
 .authpill{display:inline-block;margin:8px 0 16px;padding:7px 14px;border-radius:999px;font-size:12.5px;
   background:rgba(0,255,255,.06);border:1px solid rgba(0,255,255,.28);color:#cfefff;}
@@ -1627,6 +1630,59 @@ async def shorts_json(request: Request):
 EVAL_FILE = Path(__file__).resolve().parent / "eval_results.json"
 
 
+def _sparkline(series) -> str:
+    """Inline mini SVG of a P&L-since-call path; green if currently winning, red if not."""
+    if not series or len(series) < 2:
+        return ""
+    W, H, pad = 96, 24, 2
+    lo, hi = min(series), max(series)
+    rng = (hi - lo) or 1.0
+    n = len(series)
+    pts = " ".join(
+        f"{pad + i * (W - 2 * pad) / (n - 1):.1f},{pad + (1 - (v - lo) / rng) * (H - 2 * pad):.1f}"
+        for i, v in enumerate(series))
+    color = "#3fe08a" if series[-1] >= 0 else "#ff5a6e"
+    zero = ""
+    if lo < 0 < hi:
+        zy = pad + (1 - (0 - lo) / rng) * (H - 2 * pad)
+        zero = (f'<line x1="{pad}" y1="{zy:.1f}" x2="{W - pad}" y2="{zy:.1f}" '
+                f'stroke="#39414f" stroke-width="0.5" stroke-dasharray="2 2"/>')
+    return (f'<svg class="spark" width="{W}" height="{H}" viewBox="0 0 {W} {H}">{zero}'
+            f'<polyline fill="none" stroke="{color}" stroke-width="1.3" points="{pts}"/></svg>')
+
+
+def _equity_svg(points, color) -> str:
+    """A larger equity curve (average open-position P&L over time)."""
+    if not points or len(points) < 2:
+        return '<p class="meta">Not enough history yet — the curve fills in as picks age.</p>'
+    W, H, pl, pr, pt, pb = 560, 150, 46, 14, 12, 18
+    eqs = [p["eq"] for p in points]
+    lo, hi = min(eqs + [0.0]), max(eqs + [0.0])
+    rng = (hi - lo) or 1.0
+    n = len(points)
+
+    def X(i):
+        return pl + i * (W - pl - pr) / (n - 1)
+
+    def Y(v):
+        return pt + (1 - (v - lo) / rng) * (H - pt - pb)
+
+    line_pts = " ".join(f"{X(i):.1f},{Y(p['eq']):.1f}" for i, p in enumerate(points))
+    last = eqs[-1]
+    zy = Y(0)
+    base = (f'<line x1="{pl}" y1="{zy:.1f}" x2="{W - pr}" y2="{zy:.1f}" '
+            f'stroke="#39414f" stroke-width="0.7" stroke-dasharray="3 3"/>')
+    labels = (f'<text x="3" y="{Y(hi) + 3:.1f}" fill="#7d8499" font-size="9">{hi:+.1f}%</text>'
+              f'<text x="3" y="{zy + 3:.1f}" fill="#7d8499" font-size="9">0%</text>'
+              f'<text x="3" y="{Y(lo) + 3:.1f}" fill="#7d8499" font-size="9">{lo:+.1f}%</text>')
+    lcol = "#3fe08a" if last >= 0 else "#ff5a6e"
+    end = (f'<circle cx="{X(n - 1):.1f}" cy="{Y(last):.1f}" r="2.5" fill="{lcol}"/>'
+           f'<text x="{W - pr - 2:.1f}" y="{Y(last) - 5:.1f}" fill="{lcol}" font-size="11" '
+           f'text-anchor="end">{last:+.2f}%</text>')
+    return (f'<svg class="equity" viewBox="0 0 {W} {H}">{base}{labels}'
+            f'<polyline fill="none" stroke="{color}" stroke-width="1.7" points="{line_pts}"/>{end}</svg>')
+
+
 def _eval_table(d, side, token) -> str:
     label = "Longs &mdash; momentum picks" if side == "long" else "Shorts picks"
     moved = "rose" if side == "long" else "fell"
@@ -1654,10 +1710,12 @@ def _eval_table(d, side, token) -> str:
             f"<td>{r['entry']:.6g}</td>"
             f"<td>{r['now']:.6g}</td>"
             f"<td data-order='{pnl}' class='{cls}'><b>{pnl:+.2f}%</b></td>"
+            f"<td>{_sparkline(r.get('spark') or [])}</td>"
             f"<td>{extra}</td></tr>")
     return (f'<h3>{label}</h3><p class="meta">{summary}</p>'
             f'<table id="res{side}" class="display" style="width:100%">'
-            f'<thead><tr><th>Coin</th><th>Age&nbsp;h</th><th>Entry</th><th>Now</th><th>P&amp;L&nbsp;%</th><th></th></tr></thead>'
+            f'<thead><tr><th>Coin</th><th>Age&nbsp;h</th><th>Entry</th><th>Now</th><th>P&amp;L&nbsp;%</th>'
+            f'<th>Since call</th><th></th></tr></thead>'
             f'<tbody>{"".join(trs)}</tbody></table>')
 
 
@@ -1695,6 +1753,12 @@ Longer <b>Age</b> = more time to play out (fresh picks near 0% are just noise).
 Evaluated {gen} UTC &middot; <b id="dataage">{age_txt}</b> min old
 <span class="muted">(auto-refreshes every 5 min)</span>.</p>
 <div class="resgrid">
+  <div><h3>Long equity</h3>{_equity_svg(data.get("longs", {}).get("equity"), "#3fe08a")}
+    <p class="eqcap">Average P&amp;L across all open long picks at each 15m step (equal weight, since each call).</p></div>
+  <div><h3>Short equity</h3>{_equity_svg(data.get("shorts", {}).get("equity"), "#ff7a93")}
+    <p class="eqcap">Average P&amp;L across all open short picks at each 15m step (equal weight, since each call).</p></div>
+</div>
+<div class="resgrid">
   <div>{_eval_table(data.get("longs", {}), "long", token)}</div>
   <div>{_eval_table(data.get("shorts", {}), "short", token)}</div>
 </div>
@@ -1703,7 +1767,8 @@ Evaluated {gen} UTC &middot; <b id="dataage">{age_txt}</b> min old
 <script>$(document).ready(function(){{
   ['reslong','resshort'].forEach(function(id){{
     var el=document.getElementById(id);
-    if(el) $('#'+id).DataTable({{"paging":false,"dom":"t","order":[[4,"desc"]]}});
+    if(el) $('#'+id).DataTable({{"paging":false,"dom":"t","order":[[4,"desc"]],
+      "columnDefs":[{{"orderable":false,"searchable":false,"targets":[5]}}]}});
   }});
   var gts={int(gen_ts) if gen_ts else 0}, ageEl=document.getElementById('dataage');
   if(gts && ageEl){{ function upd(){{ ageEl.textContent=Math.max(0,Math.floor((Date.now()/1000-gts)/60)); }} upd(); setInterval(upd,30000); }}
