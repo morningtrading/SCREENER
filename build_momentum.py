@@ -78,6 +78,7 @@ _DEFAULTS = {
         "early_min_signals": 2,        # >= this many leading signals -> flagged EARLY
         "early_weight": 0.2,           # small score bonus per leading signal that fires
         "regime_coins": ["BTC", "ETH", "HYPE", "ZEC"],  # reference coins for the market-regime banner
+        "picks_keep": 20000,           # max lines kept in momentum_history/momentum_picks.jsonl
     }
 }
 
@@ -482,6 +483,7 @@ def score_coin(base, market, cfg, recent=None, micro=None):
         "funding": detail["funding"],
         "early_signals": fired,
         "early": early,
+        "price": kl_tf["1h"]["close"][-1] if kl_tf.get("1h") else None,
         "roc": {tf: round(per_tf[tf]["roc"], 2) for tf in tfs},
         "trend": {tf: per_tf[tf]["trend_up"] for tf in tfs},
     }
@@ -599,6 +601,29 @@ def main():
         "rows": rows,
     }
     OUT_FILE.write_text(json.dumps(out, indent=2))
+
+    # Snapshot the proposed longs (momentum-flagged) with their entry price, so we can later
+    # compare to the actual price and score whether the call was right (see eval_momentum.py).
+    HIST_DIR = BASE / "momentum_history"
+    HIST_DIR.mkdir(exist_ok=True)
+    picks_file = HIST_DIR / "momentum_picks.jsonl"
+    new_lines = [json.dumps({
+        "ts": out["generated_utc"], "coin": r["coin"], "market": r.get("market"),
+        "entry_price": r.get("price"), "score": r["score"],
+        "cmc_change_24h": r.get("cmc_change_24h"), "early": r.get("early"),
+        "early_signals": r.get("early_signals"), "exchanges": r.get("exchanges"),
+    }) for r in rows if r.get("momentum") and r.get("price")]
+    if new_lines:
+        with open(picks_file, "a") as fh:
+            fh.write("\n".join(new_lines) + "\n")
+        keep = int(CFG.get("picks_keep", 20000))      # cap history (~1 week at 5-min cron)
+        try:
+            existing = picks_file.read_text().splitlines()
+            if len(existing) > keep:
+                picks_file.write_text("\n".join(existing[-keep:]) + "\n")
+        except OSError:
+            pass
+
     hot = [r["coin"] for r in rows if r["momentum"]]
     print(f"Wrote {OUT_FILE}: {len(rows)} trending coins, {out['count_momentum']} momentum "
           f"(src={source}, w1h={CFG['weights'].get('1h')}), generated {out['generated_utc']}")

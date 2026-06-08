@@ -44,7 +44,8 @@
     "early_min_signals": 2,
     "early_weight": 0.2,
 
-    "regime_coins": ["BTC", "ETH", "HYPE", "ZEC"]
+    "regime_coins": ["BTC", "ETH", "HYPE", "ZEC"],
+    "picks_keep": 20000
   },
   "shorts": {
     "timeframes": ["1h", "2h", "4h"],
@@ -74,6 +75,7 @@
     "funding_squeeze": -0.0005,
     "bounce_pct": 1.5,
     "capitulation_bar_pct": 6.0,
-    "regime_coins": ["BTC", "ETH", "HYPE", "ZEC"]
+    "regime_coins": ["BTC", "ETH", "HYPE", "ZEC"],
+    "picks_keep": 20000
   }
 }
