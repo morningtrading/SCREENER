@@ -24,31 +24,32 @@ Server, bot & data status
 Jump to any section
 
 [/summary]
-Data Summary
+CSV Download
 Per-pair market screener
 Volume · spread · volatility filters
 The raw data table
 
 [/combined]
-Combined
+Filetering spread
 Select on MEXC, backtest on Binance
 Cross-exchange shortlist
 Spread & fee aware
 
 [/momentum]
-Long
+LONG ideas
 CMC trending × Binance 1h/2h/4h
 Coins in a real uptrend, not post-pump
 Early-detection leading signals
 
 [/shorts]
-Shorts
+SHORT ideas
 Weak, liquid perps to short
 Downtrend score + reversal-risk flags
 Funding / OI aware
 
 [/results]
 Results
+Did ideas win or lose
 Track record — were the calls right?
 Entry vs price · open + settled
 Equity curves & per-pick P&L
