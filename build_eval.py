@@ -32,8 +32,12 @@ MEXC_KLINE = "https://contract.mexc.com/api/v1/contract/kline"
 SPARK_POINTS = 48          # max points kept per row sparkline
 
 # Exit policy — tunable via config.json "eval" (NOT hardcoded; same merge style as the ranker).
+# stop_loss_pct: hard stop in % P&L (e.g. -2.0). May be null (no stop), a single number applied
+# to both sides, or per-side {"long": -2.0, "short": -8.0}. Longs and shorts behave very
+# differently — a tight stop helps longs but stops out short bounces before they resolve — so
+# the per-side form is the intended one.
 CONFIG_FILE = Path(os.environ.get("SCREENER_CONFIG", str(BASE / "config.json")))
-_EVAL_DEFAULTS = {"horizon_hours": 4.0, "flip_grace_min": 15.0}
+_EVAL_DEFAULTS = {"horizon_hours": 4.0, "flip_grace_min": 15.0, "stop_loss_pct": None}
 
 
 def load_eval_config():
@@ -49,21 +53,33 @@ def load_eval_config():
 ECFG = load_eval_config()
 
 
+def sl_for(side):
+    """Hard-stop level (% P&L) for a side, or None if no stop. Accepts a single number
+    (both sides) or a per-side {"long": .., "short": ..} mapping in eval.stop_loss_pct."""
+    v = ECFG.get("stop_loss_pct")
+    return v.get(side) if isinstance(v, dict) else v
+
+
 def parse_ts(s):
     return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
 
 
-def kline_closes(coin, src, start_ms):
-    """[(openTime_ms, close), ...] of 15m candles from start_ms — Binance or MEXC."""
+def kline_ohlc(coin, src, start_ms):
+    """[(openTime_ms, high, low, close), ...] of 15m candles from start_ms — Binance or MEXC.
+
+    High/low are carried so the hard stop-loss can trigger intra-candle (on the adverse wick),
+    the way a real stop fills, rather than only when the candle closes through the level.
+    """
     if src == "mexc":
         try:
             d = bm.get_json(f"{MEXC_KLINE}/{coin}_USDT?interval=Min15&start={start_ms // 1000}").get("data", {})
-            return [(int(t) * 1000, float(c)) for t, c in zip(d.get("time", []), d.get("close", []))]
+            return [(int(t) * 1000, float(h), float(lo), float(c))
+                    for t, h, lo, c in zip(d.get("time", []), d.get("high", []), d.get("low", []), d.get("close", []))]
         except Exception:
             return []
     try:
         raw = bm.get_json(f"{FAPI}/klines?symbol={coin}USDT&interval=15m&startTime={start_ms}&limit=500")
-        return [(int(k[0]), float(k[4])) for k in raw]
+        return [(int(k[0]), float(k[2]), float(k[3]), float(k[4])) for k in raw]
     except Exception:
         return []
 
@@ -129,6 +145,7 @@ def pnl_of(entry, price, side):
 def evaluate(path, side, now, horizon_h, grace_s):
     open_rows, settled_rows, series = [], [], {}
     now_ms = int(now.timestamp() * 1000)
+    sl = sl_for(side)     # per-side hard stop (% P&L), or None
     for c, picks in coin_picks(path).items():
         for ep in split_episodes(picks, grace_s):     # each flagged run is its own position
             entry = ep[0]
@@ -141,23 +158,50 @@ def evaluate(path, side, now, horizon_h, grace_s):
             # (Binance filters by openTime, so an un-floored start drops a fresh pick until the
             # next 15m close — which left just-flagged coins missing from the open board).
             start_ms = (int(entry_dt.timestamp() * 1000) // 900_000) * 900_000
-            closes = kline_closes(c, src, start_ms)
+            ohlc = kline_ohlc(c, src, start_ms)
             # Drop future-dated candles: MEXC returns fabricated future slots for some
             # commodity/CFD perps (USOIL, NICKEL, …), which otherwise stretch the equity
             # curve weeks ahead and freeze exits on prices that don't exist yet.
-            closes = [(t, px) for t, px in closes if t <= now_ms]
-            if not closes:
+            ohlc = [k for k in ohlc if k[0] <= now_ms]
+            if not ohlc:
                 continue
             close_dt, reason = episode_close(ep, now, horizon_h, grace_s)
             close_ms = int(close_dt.timestamp() * 1000) if close_dt else None
             # Settled position: freeze the path (and the exit price) at the close time.
-            kept = [(t, px) for t, px in closes if close_ms is None or t <= close_ms] or closes[:1]
-            # P&L-since-call path (signed by side: rising = the position is winning)
-            path_pnl = [(t, round(pnl_of(entry_price, px, side), 3)) for t, px in kept if px > 0]
+            kept = [k for k in ohlc if close_ms is None or k[0] <= close_ms] or ohlc[:1]
+
+            # Hard stop-loss (per-side level `sl`): a real stop fills intra-candle on the
+            # adverse wick — the LOW for a long, the HIGH for a short. The first candle that
+            # breaches `sl` closes the position right there at the stop price. This can settle
+            # a position the screener still re-flags as open, and overrides flip/horizon.
+            stop_ms = None
+            if sl is not None:
+                for t, hi, lo, _cl in kept:
+                    adverse = lo if side == "long" else hi
+                    if adverse > 0 and pnl_of(entry_price, adverse, side) <= sl:
+                        stop_ms = t
+                        break
+
+            if stop_ms is not None:
+                kept = [k for k in kept if k[0] <= stop_ms]
+                # exit price that yields exactly `sl` for this side
+                exit_price = (entry_price * (1 + sl / 100.0) if side == "long"
+                              else entry_price / (1 + sl / 100.0))
+                pnl = round(sl, 2)
+                reason = "stop"
+                close_dt = datetime.fromtimestamp(stop_ms / 1000.0, tz=timezone.utc)
+                close_ms = stop_ms
+                # path = closes up to the stop candle, then the stop fill itself as the last point
+                path_pnl = [(t, round(pnl_of(entry_price, cl, side), 3)) for t, _h, _l, cl in kept[:-1] if cl > 0]
+                path_pnl.append((stop_ms, round(sl, 3)))
+            else:
+                # P&L-since-call path (signed by side: rising = the position is winning)
+                path_pnl = [(t, round(pnl_of(entry_price, cl, side), 3)) for t, _h, _l, cl in kept if cl > 0]
+                exit_price = kept[-1][3]
+                pnl = round(pnl_of(entry_price, exit_price, side), 2)
+
             if not path_pnl:
                 continue
-            exit_price = kept[-1][1]
-            pnl = round(pnl_of(entry_price, exit_price, side), 2)
             age = (now - entry_dt).total_seconds() / 3600.0
             held = ((close_dt or now) - entry_dt).total_seconds() / 3600.0
             # downsample for the row sparkline
