@@ -514,6 +514,7 @@ async def landing(request: Request):
         ("MEXC Ranking", "Every MEXC futures perpetual ranked the same way (public API, no key). Green = tradeable.", with_token("/mexc-ranking", token)),
         ("Combined (MEXC + Binance)", "Trade-on-MEXC selection view with Binance backtest-data links side by side.", with_token("/combined", token)),
         ("Raw JSON Summary", "Machine-readable summary of every data file.", with_token("/summary.json", token)),
+        ("\U0001F4D8 User Manual (download)", "How to download pairs and read the LONG &amp; SHORT recommendations. Markdown &mdash; updated over time.", with_token("/manual", token)),
     ]
     cards = "".join(
         f'<a class="card" href="{url}"><h3>{title}</h3><p>{desc}</p></a>'
@@ -2031,6 +2032,24 @@ async def get_csv(filename: str, request: Request):
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="{out_name}"'},
     )
+
+
+# --- Endpoint: Download the user manual (Markdown) ---
+USER_MANUAL_FILE = Path(os.environ.get("SCREENER_USER_MANUAL", str(HERE / "USER_MANUAL.md")))
+
+
+@app.get("/manual")
+async def get_manual(request: Request):
+    if not is_authenticated(request):
+        return login_redirect(request)
+    if not USER_MANUAL_FILE.exists() or not USER_MANUAL_FILE.is_file():
+        raise HTTPException(status_code=404, detail="User manual not found.")
+    return FileResponse(
+        str(USER_MANUAL_FILE),
+        media_type="text/markdown",
+        filename="SCREENER_User_Manual.md",
+    )
+
 
 if __name__ == "__main__":
     import uvicorn
