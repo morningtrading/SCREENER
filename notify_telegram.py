@@ -40,7 +40,9 @@ SHORTS_FILE = BASE / "shorts_ranking.json"
 STATE_FILE = BASE / ".alert_state.json"
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "").strip()
+# One or more recipients: a personal chat id and/or a group id (negative),
+# separated by commas or spaces — every one gets the same alert.
+CHAT_IDS = [c for c in os.environ.get("TELEGRAM_CHAT_ID", "").replace(",", " ").split() if c]
 MIN_SCORE = float(os.environ.get("ALERT_MIN_SCORE", "1.9"))
 HOST = os.environ.get("SCREENER_HOST", "").strip()
 
@@ -64,12 +66,12 @@ def _qualifiers(data: dict, flag: str, score_key: str) -> dict:
     return out
 
 
-def _send(text: str, retries: int = 4) -> bool:
+def _send_one(chat_id: str, text: str, retries: int = 4) -> bool:
     # Telegram connectivity from the VPS is occasionally flaky (timeouts), so
     # retry with backoff rather than dropping the alert on a single hiccup.
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {
-        "chat_id": CHAT_ID,
+        "chat_id": chat_id,
         "text": text,
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
@@ -79,13 +81,22 @@ def _send(text: str, retries: int = 4) -> bool:
             resp = requests.post(url, json=payload, timeout=30)
             if resp.status_code == 200:
                 return True
-            print(f"[notify] telegram error {resp.status_code}: {resp.text[:200]}")
+            print(f"[notify] {chat_id} error {resp.status_code}: {resp.text[:200]}")
             return False  # an API rejection won't fix itself on retry
         except Exception as exc:  # network hiccup — back off and retry
-            print(f"[notify] attempt {attempt}/{retries} failed: {type(exc).__name__}")
+            print(f"[notify] {chat_id} attempt {attempt}/{retries} failed: {type(exc).__name__}")
             if attempt < retries:
                 time.sleep(5 * attempt)
     return False
+
+
+def _send(text: str) -> bool:
+    # Deliver to every configured recipient (personal chat and/or group).
+    # Returns True if at least one delivery succeeded.
+    ok = False
+    for chat_id in CHAT_IDS:
+        ok = _send_one(chat_id, text) or ok
+    return ok
 
 
 def _fmt(side: str, emoji: str, entries: dict, path: str) -> str:
@@ -99,7 +110,7 @@ def _fmt(side: str, emoji: str, entries: dict, path: str) -> str:
 
 
 def main() -> None:
-    if not BOT_TOKEN or not CHAT_ID:
+    if not BOT_TOKEN or not CHAT_IDS:
         print("[notify] TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID unset — skipping.")
         return
 
