@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 PORT="${PORT:-8000}"
-if pkill -f "uvicorn data_server:app --host 0.0.0.0 --port $PORT"; then
+if pkill -f "uvicorn data_server:app .*--port $PORT"; then
     echo "🛑 Stopped screener on :$PORT"
 else
     echo "Not running on :$PORT"
