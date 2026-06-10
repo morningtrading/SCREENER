@@ -924,7 +924,6 @@ async def summary(request: Request):
         ('<a href="' + with_token('/summary', token) + '" class="btn">&#8617; Show All Coins</a>') if asset else '',
         auth_status_html(request),
         f"<h2>Data Summary{(' &mdash; ' + asset) if asset else ''}</h2>",
-        DATA_TYPE_LEGEND,
         ('<div class="searchbar">'
          '<span class="sicon">&#128269;</span>'
          '<input id="tsearch" type="search" placeholder="Search coin, timeframe, type, file…" autocomplete="off">'
@@ -991,6 +990,7 @@ async def summary(request: Request):
                     f"</tr>"
                 )
     html.append("</tbody></table>")
+    html.append(DATA_TYPE_LEGEND)     # row-type legend now sits below the table
     # DataTables JS + custom neon search (matches the ranking page)
     html.append('''
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
@@ -1105,13 +1105,6 @@ async def binance_ranking(request: Request):
 {nav_bar(request, token)}
 {auth_status_html(request)}
 <h2>Full Binance Futures Ranking</h2>
-<p class="meta">All {data.get('total_symbols')} live USDⓈ-M PERPETUAL symbols, ranked by round-trip cost
-(spread % + {data.get('fees',{}).get('roundtrip_taker_pct')}% fee).
-<span class="chip good">FILTER PASS</span> = 24h volume &ge; {data.get('min_volume'):,.0f} USDT
-AND spread &le; {data.get('max_spread_pct')}%
-AND volatility &ge; {data.get('min_volatility_pct')}%.
-<b>{data.get('count_good')}</b> of {data.get('total_symbols')} qualify.
-Volatility = 24h (high-low)/avg %.<br>Generated {data.get('generated_utc')} UTC.</p>
 <div class="searchbar">
   <span class="sicon">&#128269;</span>
   <input id="ranksearch" type="search" placeholder="Search coin, rank or value…" autocomplete="off" autofocus>
@@ -1124,6 +1117,13 @@ Volatility = 24h (high-low)/avg %.<br>Generated {data.get('generated_utc')} UTC.
 <tbody>
 {''.join(rows_html)}
 </tbody></table>
+<p class="meta">All {data.get('total_symbols')} live USDⓈ-M PERPETUAL symbols, ranked by round-trip cost
+(spread % + {data.get('fees',{}).get('roundtrip_taker_pct')}% fee).
+<span class="chip good">FILTER PASS</span> = 24h volume &ge; {data.get('min_volume'):,.0f} USDT
+AND spread &le; {data.get('max_spread_pct')}%
+AND volatility &ge; {data.get('min_volatility_pct')}%.
+<b>{data.get('count_good')}</b> of {data.get('total_symbols')} qualify.
+Volatility = 24h (high-low)/avg %.<br>Generated {data.get('generated_utc')} UTC.</p>
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
 <script>$(document).ready(function(){{
@@ -1204,13 +1204,6 @@ async def mexc_ranking(request: Request):
 {nav_bar(request, token)}
 {auth_status_html(request)}
 <h2>Full MEXC Futures Ranking</h2>
-<p class="meta">All {data.get('total_symbols')} live USDT-margined perpetuals (MEXC public API, no key),
-ranked by round-trip cost (spread % + {data.get('fees',{}).get('roundtrip_taker_pct')}% fee).
-<span class="chip good">FILTER PASS</span> = 24h volume &ge; {data.get('min_volume'):,.0f} USDT
-AND spread &le; {data.get('max_spread_pct')}%
-AND volatility &ge; {data.get('min_volatility_pct')}%.
-<b>{data.get('count_good')}</b> of {data.get('total_symbols')} qualify.
-Coin links go to the Binance data summary (backtest CSVs).<br>Generated {data.get('generated_utc')} UTC.</p>
 <div class="searchbar">
   <span class="sicon">&#128269;</span>
   <input id="ranksearch" type="search" placeholder="Search coin, rank or value…" autocomplete="off" autofocus>
@@ -1223,6 +1216,13 @@ Coin links go to the Binance data summary (backtest CSVs).<br>Generated {data.ge
 <tbody>
 {''.join(rows_html)}
 </tbody></table>
+<p class="meta">All {data.get('total_symbols')} live USDT-margined perpetuals (MEXC public API, no key),
+ranked by round-trip cost (spread % + {data.get('fees',{}).get('roundtrip_taker_pct')}% fee).
+<span class="chip good">FILTER PASS</span> = 24h volume &ge; {data.get('min_volume'):,.0f} USDT
+AND spread &le; {data.get('max_spread_pct')}%
+AND volatility &ge; {data.get('min_volatility_pct')}%.
+<b>{data.get('count_good')}</b> of {data.get('total_symbols')} qualify.
+Coin links go to the Binance data summary (backtest CSVs).<br>Generated {data.get('generated_utc')} UTC.</p>
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
 <script>$(document).ready(function(){{
@@ -1468,6 +1468,19 @@ async def momentum_page(request: Request):
 {nav_bar(request, token)}
 {auth_status_html(request)}
 <h2>Momentum — trending coins in a real uptrend</h2>
+{_regime_banner(data.get("regime"))}
+<div class="searchbar">
+  <span class="sicon">&#128269;</span>
+  <input id="momentumsearch" type="search" placeholder="Search coin, rank or value…" autocomplete="off" autofocus>
+  <button id="searchbtn" class="sbtn" type="button">Search</button>
+  <button id="clearbtn" class="sbtn clear" type="button">Clear</button>
+</div>
+<table id="rank" class="display" style="width:100%">
+<thead><tr><th>CMC#</th><th>Coin</th><th>Chart</th><th>Score</th><th>Recent<br>5·15·30·45m</th><th>Buy%</th><th>RVOL</th><th>Early</th><th>1h&nbsp;%</th><th>2h&nbsp;%</th><th>4h&nbsp;%</th>
+<th>Ext&nbsp;%</th><th>4h&nbsp;Trend</th><th>Mkt</th><th>Exchanges</th><th>Momentum</th></tr></thead>
+<tbody>
+{''.join(rows_html)}
+</tbody></table>
 <p class="meta">CoinMarketCap's {data.get('total')} trending coins, scored on Binance
 <b>1h/2h/4h</b> candles (weights {w.get('1h')}/{w.get('2h')}/{w.get('4h')}, strong on 1h)
 plus a small recent bucket ({w.get('recent')}) and a 5–15m acceleration term.
@@ -1490,19 +1503,6 @@ flags confluence — <span class="sig">BUY</span><span class="sig">VOL</span> de
 <span class="chip good">EARLY</span> = {cfg.get('early_min_signals')}+ fired (hover each for the value).<br>
 Source {data.get('source')} · generated {gen} UTC · <b id="dataage">{age_txt}</b> min old
 <span class="muted">(auto-refreshes every 5 min)</span>.</p>
-{_regime_banner(data.get("regime"))}
-<div class="searchbar">
-  <span class="sicon">&#128269;</span>
-  <input id="momentumsearch" type="search" placeholder="Search coin, rank or value…" autocomplete="off" autofocus>
-  <button id="searchbtn" class="sbtn" type="button">Search</button>
-  <button id="clearbtn" class="sbtn clear" type="button">Clear</button>
-</div>
-<table id="rank" class="display" style="width:100%">
-<thead><tr><th>CMC#</th><th>Coin</th><th>Chart</th><th>Score</th><th>Recent<br>5·15·30·45m</th><th>Buy%</th><th>RVOL</th><th>Early</th><th>1h&nbsp;%</th><th>2h&nbsp;%</th><th>4h&nbsp;%</th>
-<th>Ext&nbsp;%</th><th>4h&nbsp;Trend</th><th>Mkt</th><th>Exchanges</th><th>Momentum</th></tr></thead>
-<tbody>
-{''.join(rows_html)}
-</tbody></table>
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
 <script>$(document).ready(function(){{
@@ -1657,19 +1657,6 @@ async def shorts_page(request: Request):
 {nav_bar(request, token)}
 {auth_status_html(request)}
 <h2>Top perps to short — weak, liquid, low reversal risk</h2>
-<p class="meta">Scanned {data.get('scanned')} MEXC + HL perps; those most <b>pulled back from their 24h high</b>
-(with &ge; {cfg.get('min_volume_usdt', 0) / 1e6:.0f}M 24h volume <b>and MEXC spread &le; {data.get('max_spread_pct')}%</b>)
-are deep-scored on 1h/2h/4h (Binance when listed, else MEXC) — catches coins dropping <i>now</i> even if
-still green on the day. <span class="chip short">SHORT</span> = strong weakness,
-1h falling, 4h downtrend confirmed. Breakdown badges:
-<span class="sig">SELL</span><span class="sig">VOL</span><span class="sig">ACC&#9660;</span><span class="sig">BRK&#9660;</span><span class="sig">OI&#9650;</span><span class="sig">F</span>.
-<b>{data.get('count_short')}</b> flagged &mdash; only these confirmed shorts are listed
-(rejected near-misses, incl. coins that have since bounced, are scored but hidden).
-The <span class="warn high">&#9888;</span> marks
-<b>reversal risk</b> (oversold / crowded-short / bounce / capitulation) — info only; toggle below
-to filter it out.<br>
-generated {gen} UTC &middot; <b id="dataage">{age_txt}</b> min old
-<span class="muted">(auto-refreshes every 5 min)</span>.</p>
 {_regime_banner(data.get("regime"))}
 <label class="risktoggle"><input type="checkbox" id="hiderisk"> &#9888; Hide high reversal-risk (show only cleaner shorts)</label>
 <div class="searchbar">
@@ -1685,6 +1672,19 @@ generated {gen} UTC &middot; <b id="dataage">{age_txt}</b> min old
 <tbody>
 {''.join(rows_html)}
 </tbody></table>
+<p class="meta">Scanned {data.get('scanned')} MEXC + HL perps; those most <b>pulled back from their 24h high</b>
+(with &ge; {cfg.get('min_volume_usdt', 0) / 1e6:.0f}M 24h volume <b>and MEXC spread &le; {data.get('max_spread_pct')}%</b>)
+are deep-scored on 1h/2h/4h (Binance when listed, else MEXC) — catches coins dropping <i>now</i> even if
+still green on the day. <span class="chip short">SHORT</span> = strong weakness,
+1h falling, 4h downtrend confirmed. Breakdown badges:
+<span class="sig">SELL</span><span class="sig">VOL</span><span class="sig">ACC&#9660;</span><span class="sig">BRK&#9660;</span><span class="sig">OI&#9650;</span><span class="sig">F</span>.
+<b>{data.get('count_short')}</b> flagged &mdash; only these confirmed shorts are listed
+(rejected near-misses, incl. coins that have since bounced, are scored but hidden).
+The <span class="warn high">&#9888;</span> marks
+<b>reversal risk</b> (oversold / crowded-short / bounce / capitulation) — info only; use the
+toggle above the table to filter it out.<br>
+generated {gen} UTC &middot; <b id="dataage">{age_txt}</b> min old
+<span class="muted">(auto-refreshes every 5 min)</span>.</p>
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
 <script>$(document).ready(function(){{
@@ -1858,10 +1858,25 @@ async def results_page(request: Request):
 {nav_bar(request, token)}
 {auth_status_html(request)}
 <h2>Track record — entry price vs price since the call</h2>
+<div class="resgrid">
+  <div><h3>Long equity</h3>{_equity_svg(data.get("longs", {}).get("equity"), "#3fe08a")}
+    <p class="eqcap">Average P&amp;L across long picks while open at each 15m step (a pick drops out once it settles).</p></div>
+  <div><h3>Short equity</h3>{_equity_svg(data.get("shorts", {}).get("equity"), "#ff7a93")}
+    <p class="eqcap">Average P&amp;L across short picks while open at each 15m step (a pick drops out once it settles).</p></div>
+</div>
+<div class="resgrid">
+  <div>{_eval_table(data.get("longs", {}), "long", token)}</div>
+  <div>{_eval_table(data.get("shorts", {}), "short", token)}</div>
+</div>
+<h2 style="margin-top:26px">Settled — closed at the {horizon_txt}h horizon or when momentum flipped off</h2>
+<div class="resgrid">
+  <div>{_eval_table(data.get("longs", {}).get("settled", {}), "long", token, settled=True)}</div>
+  <div>{_eval_table(data.get("shorts", {}).get("settled", {}), "short", token, settled=True)}</div>
+</div>
 <p class="meta">Each coin's <b>first</b> flag is the entry. A pick stays <b>open</b> while the screener
 keeps flagging it and tracks the live price; it <b>settles</b> — P&amp;L frozen at the close price —
 once it reaches the <b>{horizon_txt}h</b> horizon or momentum flips off, whichever comes first.
-Open picks are the active board; settled picks are the realized record below.
+Open picks are the active board above; settled picks are the realized record.
 Evaluated {gen} UTC &middot; <b id="dataage">{age_txt}</b> min old
 <span class="muted">(auto-refreshes every 5 min)</span>.</p>
 <div class="legend">
@@ -1877,21 +1892,6 @@ Evaluated {gen} UTC &middot; <b id="dataage">{age_txt}</b> min old
 <br>Per-call tag:
 <span class="sig">EARLY</span> = the long fired the <b>early-detection</b> confluence at the call (the early leading-signal threshold); &nbsp;
 <span class="warn high">&#9888;</span> = the short had <b>reversal risk</b> at the call (oversold / crowded-short / bounce; a fainter icon = lower risk).
-</div>
-<div class="resgrid">
-  <div><h3>Long equity</h3>{_equity_svg(data.get("longs", {}).get("equity"), "#3fe08a")}
-    <p class="eqcap">Average P&amp;L across long picks while open at each 15m step (a pick drops out once it settles).</p></div>
-  <div><h3>Short equity</h3>{_equity_svg(data.get("shorts", {}).get("equity"), "#ff7a93")}
-    <p class="eqcap">Average P&amp;L across short picks while open at each 15m step (a pick drops out once it settles).</p></div>
-</div>
-<div class="resgrid">
-  <div>{_eval_table(data.get("longs", {}), "long", token)}</div>
-  <div>{_eval_table(data.get("shorts", {}), "short", token)}</div>
-</div>
-<h2 style="margin-top:26px">Settled — closed at the {horizon_txt}h horizon or when momentum flipped off</h2>
-<div class="resgrid">
-  <div>{_eval_table(data.get("longs", {}).get("settled", {}), "long", token, settled=True)}</div>
-  <div>{_eval_table(data.get("shorts", {}).get("settled", {}), "short", token, settled=True)}</div>
 </div>
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
@@ -1979,11 +1979,6 @@ async def combined(request: Request):
 {nav_bar(request, token)}
 {auth_status_html(request)}
 <h2>Combined ranking — MEXC selection &middot; Binance backtest data</h2>
-<p class="meta">Ranked by <b>MEXC</b> round-trip cost (spread % + {mexc_fee}% fee) — the exchange you trade on.
-<span class="chip good">FILTER PASS</span> reflects MEXC volume/spread/volatility thresholds.
-The <b>Binance Cost %</b> column and the <b>Backtest</b> CSV link are for historical data only
-(downloads come from the bundled Binance feather files).<br>
-{mexc.get('total_symbols')} MEXC symbols &middot; {mexc.get('count_good')} good &middot; generated {mexc.get('generated_utc')} UTC.</p>
 <div class="searchbar">
   <span class="sicon">&#128269;</span>
   <input id="ranksearch" type="search" placeholder="Search coin, rank or value…" autocomplete="off" autofocus>
@@ -1996,6 +1991,11 @@ The <b>Binance Cost %</b> column and the <b>Backtest</b> CSV link are for histor
 <tbody>
 {''.join(rows_html)}
 </tbody></table>
+<p class="meta">Ranked by <b>MEXC</b> round-trip cost (spread % + {mexc_fee}% fee) — the exchange you trade on.
+<span class="chip good">FILTER PASS</span> reflects MEXC volume/spread/volatility thresholds.
+The <b>Binance Cost %</b> column and the <b>Backtest</b> CSV link are for historical data only
+(downloads come from the bundled Binance feather files).<br>
+{mexc.get('total_symbols')} MEXC symbols &middot; {mexc.get('count_good')} good &middot; generated {mexc.get('generated_utc')} UTC.</p>
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
 <script>$(document).ready(function(){{
