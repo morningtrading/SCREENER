@@ -15,10 +15,16 @@ Writes shorts_ranking.json for the data server (/shorts). Reuses build_momentum'
 """
 import os
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 
 import build_momentum as bm   # reuse fetch_klines, tf metrics, recent_changes, oi/funding, regime
+
+# Deep-scoring the shortlist is pure HTTP wait (klines for 1h/2h/4h + recent/OI per coin),
+# so we fan it out across threads. get_json/fetch_klines are stateless (urllib, no shared
+# session/cache), hence thread-safe. Tunable via SHORTS_SCAN_WORKERS.
+SCAN_WORKERS = int(os.environ.get("SHORTS_SCAN_WORKERS", "8"))
 
 BASE = Path(__file__).resolve().parent
 OUT_FILE = BASE / "shorts_ranking.json"
@@ -435,8 +441,7 @@ def main():
     pool.sort(key=lambda c: c["weakness"] if c["weakness"] is not None else 0.0)
     pool = pool[: CFG["scan_shortlist"]]
 
-    rows = []
-    for c in pool:
+    def deep_score(c):
         b = c["coin"]
         data_src = "binance" if b in perp else ("mexc" if b in mexc else None)
         row = dict(c)
@@ -453,7 +458,11 @@ def main():
             res = score_short(b, data_src, CFG, rec.get("windows", {}), micro)
             if res:
                 row.update(res)
-        rows.append(row)
+        return row
+
+    # Fan the per-coin HTTP work out across threads; preserves pool order.
+    with ThreadPoolExecutor(max_workers=max(1, SCAN_WORKERS)) as ex:
+        rows = list(ex.map(deep_score, pool))
 
     # rank: confirmed SHORTs first, then by weakness score (unscored sink); keep store_top
     rows.sort(key=lambda r: (r["short"], r["short_score"] if r["short_score"] is not None else -1e9), reverse=True)

@@ -27,3 +27,6 @@ momentum_refresh.log
 
 # Telegram alert dedup state
 .alert_state.json
+
+# Cron single-instance lock
+.refresh.lock
