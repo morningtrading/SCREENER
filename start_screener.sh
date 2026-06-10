@@ -18,14 +18,11 @@ elif command -v uvicorn >/dev/null 2>&1; then
 else
     echo "❌ uvicorn not found. Run: python3 -m venv .venv && .venv/bin/pip install -r requirements.txt"; exit 1
 fi
-# Bind dual-stack (::) so the dashboard answers on IPv6 too — Tailscale MagicDNS
-# names like "permanent" resolve to IPv6 first, and IPv4-only (0.0.0.0) made
-# browsers fail to connect. On Linux "::" accepts both IPv6 and IPv4.
-if pgrep -f "uvicorn data_server:app .*--port $PORT" >/dev/null 2>&1; then
+if pgrep -f "uvicorn data_server:app --host 0.0.0.0 --port $PORT" >/dev/null 2>&1; then
     echo "✓ Screener already running on port $PORT"; exit 0
 fi
 
-nohup "$UVICORN" data_server:app --host :: --port "$PORT" > screener.log 2>&1 &
+nohup "$UVICORN" data_server:app --host 0.0.0.0 --port "$PORT" > screener.log 2>&1 &
 echo $! > screener.pid
 sleep 1
 if ss -tln | grep -q ":$PORT"; then
