@@ -43,7 +43,11 @@ BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
 # One or more recipients: a personal chat id and/or a group id (negative),
 # separated by commas or spaces — every one gets the same alert.
 CHAT_IDS = [c for c in os.environ.get("TELEGRAM_CHAT_ID", "").replace(",", " ").split() if c]
-MIN_SCORE = float(os.environ.get("ALERT_MIN_SCORE", "1.9"))
+# Per-side score thresholds. Shorts score higher than longs, so they default
+# apart; ALERT_MIN_SCORE sets the shared fallback for both.
+_BASE_MIN = os.environ.get("ALERT_MIN_SCORE", "1.9")
+LONG_MIN = float(os.environ.get("ALERT_MIN_SCORE_LONG", "1.3"))
+SHORT_MIN = float(os.environ.get("ALERT_MIN_SCORE_SHORT", _BASE_MIN))
 HOST = os.environ.get("SCREENER_HOST", "").strip()
 
 
@@ -54,12 +58,12 @@ def _load(path: Path) -> dict:
         return {}
 
 
-def _qualifiers(data: dict, flag: str, score_key: str) -> dict:
+def _qualifiers(data: dict, flag: str, score_key: str, min_score: float) -> dict:
     """Return {coin: score} for rows that are on the board and over threshold."""
     out = {}
     for r in data.get("rows", []):
         score = r.get(score_key)
-        if r.get(flag) and isinstance(score, (int, float)) and score > MIN_SCORE:
+        if r.get(flag) and isinstance(score, (int, float)) and score > min_score:
             coin = r.get("coin")
             if coin:
                 out[coin] = round(float(score), 2)
@@ -104,9 +108,9 @@ def _toobit_url(coin: str) -> str:
     return f"https://www.toobit.com/en-US/futures/{coin}-SWAP-USDT"
 
 
-def _fmt(side: str, emoji: str, entries: dict, path: str) -> str:
+def _fmt(side: str, emoji: str, entries: dict, path: str, min_score: float) -> str:
     link = f"https://{HOST}{path}" if HOST else None
-    head = f"{emoji} <b>New {side}</b> (score &gt; {MIN_SCORE:g})"
+    head = f"{emoji} <b>New {side}</b> (score &gt; {min_score:g})"
     if link:
         head = f'{head} — <a href="{link}">open</a>'
     lines = [f'• <a href="{_toobit_url(coin)}">{coin}</a> — {score:.2f}'
@@ -119,8 +123,8 @@ def main() -> None:
         print("[notify] TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID unset — skipping.")
         return
 
-    longs = _qualifiers(_load(MOMENTUM_FILE), "momentum", "score")
-    shorts = _qualifiers(_load(SHORTS_FILE), "short", "short_score")
+    longs = _qualifiers(_load(MOMENTUM_FILE), "momentum", "score", LONG_MIN)
+    shorts = _qualifiers(_load(SHORTS_FILE), "short", "short_score", SHORT_MIN)
 
     state = _load(STATE_FILE)
     prev_long = set(state.get("long", []))
@@ -135,9 +139,9 @@ def main() -> None:
     if not first_run and (new_long or new_short):
         blocks = []
         if new_long:
-            blocks.append(_fmt("LONG", "🟢", new_long, "/momentum"))
+            blocks.append(_fmt("LONG", "🟢", new_long, "/momentum", LONG_MIN))
         if new_short:
-            blocks.append(_fmt("SHORT", "🔴", new_short, "/shorts"))
+            blocks.append(_fmt("SHORT", "🔴", new_short, "/shorts", SHORT_MIN))
         if _send("\n\n".join(blocks)):
             print(f"[notify] sent: {len(new_long)} long, {len(new_short)} short")
     elif first_run:
