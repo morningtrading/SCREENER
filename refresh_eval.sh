@@ -22,4 +22,8 @@ elif [ -n "${SCREENER_VENV:-}" ] && [ -x "$SCREENER_VENV/bin/python" ]; then PY=
 else PY="python3"; fi
 
 echo "=== $(date -u +%Y-%m-%dT%H:%M:%SZ) eval refresh ===" >> momentum_refresh.log
-"$PY" build_eval.py >> momentum_refresh.log 2>&1
+# Run at low CPU/IO priority: this box has only 2 cores, and the backtest is
+# CPU-heavy (pandas). Niced, it yields to the 1-minute alert loop's builds when
+# they overlap, so eval never slows down alert latency.
+nice -n 19 ionice -c3 "$PY" build_eval.py >> momentum_refresh.log 2>&1 \
+    || "$PY" build_eval.py >> momentum_refresh.log 2>&1
