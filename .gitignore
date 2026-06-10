@@ -32,3 +32,5 @@ momentum_refresh.log
 .refresh.lock
 # Eval single-instance lock
 .eval.lock
+# Static universe cache
+.cache/

@@ -33,6 +33,31 @@ MEXC_KLINE = "https://contract.mexc.com/api/v1/contract/kline"
 MEXC_DETAIL = "https://contract.mexc.com/api/v1/contract/detail"
 TIMEOUT, UA = bm.TIMEOUT, bm.UA
 
+# Cache for the *static* universe lists — the Binance-perp symbol set and the
+# MEXC CFD-exclusion set only change when a coin is listed/delisted, so we don't
+# refetch them every minute. Live ticker data (mexc/hl vol/change/drawdown) is
+# NOT cached, so weakness ranking and scores stay fresh. TTL via SHORTS_UNIVERSE_TTL.
+CACHE_DIR = BASE / ".cache"
+UNIVERSE_TTL = int(os.environ.get("SHORTS_UNIVERSE_TTL", "1800"))   # seconds (30 min)
+
+
+def _cached_set(name, ttl, fn):
+    """Return fn() as a set, served from a JSON file cache when younger than ttl."""
+    import time
+    f = CACHE_DIR / f"{name}.json"
+    try:
+        if f.exists() and (time.time() - f.stat().st_mtime) < ttl:
+            return set(json.loads(f.read_text()))
+    except Exception:
+        pass
+    val = fn()
+    try:
+        CACHE_DIR.mkdir(exist_ok=True)
+        f.write_text(json.dumps(sorted(val)))
+    except Exception:
+        pass   # cache is best-effort; a write failure must not break the scan
+    return val
+
 # MEXC lists non-crypto CFD perps (stocks, forex, commodities, metals, indices) tagged by
 # "trade zone" in conceptPlate. We exclude these from the crypto shorts universe — their klines
 # are non-crypto and MEXC even returns fabricated future candles for some of them.
@@ -408,10 +433,11 @@ def score_short(base, data_src, cfg, recent, micro):
 
 # ------------------------------------------------------------------------------------ main
 def main():
-    mexc = mexc_universe()
-    hl = hl_universe()
-    perp = bm.futures_perp_bases()
-    excluded = commodity_bases()   # MEXC stock/forex/commodity CFD perps — not crypto
+    mexc = mexc_universe()   # live ticker — fresh every run (drives weakness)
+    hl = hl_universe()       # live ticker — fresh every run
+    # Static symbol lists (change only on listing/delisting) — cached to save ~7.5s/run.
+    perp = _cached_set("perp_bases", UNIVERSE_TTL, bm.futures_perp_bases)
+    excluded = _cached_set("commodity_bases", UNIVERSE_TTL, commodity_bases)
 
     bases = (set(mexc) | set(hl)) - excluded
     cands = []
