@@ -99,12 +99,17 @@ def _send(text: str) -> bool:
     return ok
 
 
+def _toobit_url(coin: str) -> str:
+    # Toobit perpetual futures page, e.g. SIREN -> .../futures/SIREN-SWAP-USDT
+    return f"https://www.toobit.com/en-US/futures/{coin}-SWAP-USDT"
+
+
 def _fmt(side: str, emoji: str, entries: dict, path: str) -> str:
     link = f"https://{HOST}{path}" if HOST else None
     head = f"{emoji} <b>New {side}</b> (score &gt; {MIN_SCORE:g})"
     if link:
         head = f'{head} — <a href="{link}">open</a>'
-    lines = [f"• <code>{coin}</code> — {score:.2f}"
+    lines = [f'• <a href="{_toobit_url(coin)}">{coin}</a> — {score:.2f}'
              for coin, score in sorted(entries.items(), key=lambda kv: -kv[1])]
     return head + "\n" + "\n".join(lines)
 
