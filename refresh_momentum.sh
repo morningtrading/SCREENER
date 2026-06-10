@@ -17,6 +17,10 @@ else PY="python3"; fi
 
 # Timestamped line + script output, appended to a rotating-ish log.
 echo "=== $(date -u +%Y-%m-%dT%H:%M:%SZ) refresh ===" >> momentum_refresh.log
-"$PY" build_momentum.py >> momentum_refresh.log 2>&1
-"$PY" build_shorts.py   >> momentum_refresh.log 2>&1
-"$PY" build_eval.py     >> momentum_refresh.log 2>&1
+"$PY" build_momentum.py  >> momentum_refresh.log 2>&1
+"$PY" build_shorts.py    >> momentum_refresh.log 2>&1
+"$PY" build_eval.py      >> momentum_refresh.log 2>&1
+
+# Telegram alert for coins newly entering the LONG/SHORT lists (score > 1.9).
+# No-ops silently unless TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID are set in .env.
+"$PY" notify_telegram.py >> momentum_refresh.log 2>&1

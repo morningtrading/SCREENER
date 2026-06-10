@@ -24,3 +24,6 @@ momentum_history/
 shorts_history/
 # Cron refresh log
 momentum_refresh.log
+
+# Telegram alert dedup state
+.alert_state.json
