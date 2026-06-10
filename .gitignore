@@ -30,3 +30,5 @@ momentum_refresh.log
 
 # Cron single-instance lock
 .refresh.lock
+# Eval single-instance lock
+.eval.lock

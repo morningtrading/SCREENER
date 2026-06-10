@@ -35,9 +35,8 @@ mpid=$!
 spid=$!
 wait "$mpid"; wait "$spid"
 
-# eval reads both rankings, so it runs after they finish.
-"$PY" build_eval.py      >> momentum_refresh.log 2>&1
-
-# Telegram alert for coins newly entering the LONG/SHORT lists (score > 1.9).
+# Fire alerts immediately off the fresh rankings. build_eval (the /eval backtest
+# dashboard) is intentionally NOT here — it is slow and variable, and alerts must
+# not wait on it; it runs on its own slower schedule via refresh_eval.sh.
 # No-ops silently unless TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID are set in .env.
 "$PY" notify_telegram.py >> momentum_refresh.log 2>&1
