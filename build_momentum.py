@@ -18,8 +18,14 @@ import os
 import json
 import urllib.request
 import urllib.error
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+
+# Deep-scoring the candidate pool is pure HTTP wait (klines for 1h/2h/4h + recent/OI per
+# coin). Threads overlap that wait; each request uses its own urllib call (no shared mutable
+# state), hence thread-safe — same pattern as the shorts screener. Tunable via MOM_SCAN_WORKERS.
+SCAN_WORKERS = int(os.environ.get("MOM_SCAN_WORKERS", "10"))
 
 BASE = Path(__file__).resolve().parent
 OUT_FILE = BASE / "momentum_ranking.json"
@@ -60,6 +66,9 @@ _DEFAULTS = {
         "require_uptrend_alignment": True,  # require the 4h trend to confirm (not just a 1h blip)
         "spot_fallback": True,         # score coins via Binance spot when they have no perpetual
         "candidate_limit": 30,         # max trending coins to evaluate
+        "broad_universe": True,        # also scan the full MEXC+HL perp universe (mirror of the shorts screener), not just CMC trending
+        "broad_scan_top": 30,          # deep-score the N strongest (by 24h change) universe perps, on top of trending
+        "broad_min_volume_usdt": 2000000,  # min 24h volume for a universe coin to enter the broad shortlist
         "snapshot_keep": 300,          # how many timestamped CMC snapshots to retain (~1 day at 5-min cron)
         "max_noise_pct": None,         # max-noise entry gate: demote a long if its median 5m candle range exceeds this % (null = off)
         "noise_bars": 12,              # 5m bars (≈1h) over which the median candle-range "noise" is measured
@@ -540,8 +549,36 @@ def main():
     except Exception:
         pass
 
-    rows = []
-    for c in trending:
+    # Candidate pool. CMC trending is the coins the market is *watching* — a narrow (~10-30)
+    # list that goes empty in a broad sell-off. Mirror the shorts screener: also pull the full
+    # MEXC+HL perp universe, rank it by 24h strength, and deep-score the strongest, so a coin
+    # bucking a weak tape is found even when CMC isn't featuring it. The uptrend/extension gates
+    # in score_coin still decide what actually flags. broad_universe:false => trending only.
+    candidates = list(trending)
+    if CFG.get("broad_universe"):
+        try:
+            import build_shorts as bs   # lazy: avoids a circular import at module load
+            uni = {}
+            for src in (bs.mexc_universe(), bs.hl_universe()):
+                for b, t in src.items():
+                    # keep the higher-volume ticker when a coin is on both venues
+                    if b not in uni or (t.get("vol24") or 0) > (uni[b].get("vol24") or 0):
+                        uni[b] = t
+            have = {(c.get("symbol") or "").upper() for c in trending}
+            min_vol = CFG.get("broad_min_volume_usdt", 0) or 0
+            extra = [b for b, t in uni.items()
+                     if b and b not in have and (t.get("vol24") or 0) >= min_vol]
+            # strongest first (most up on the day); the deep score rejects post-pump blow-offs
+            extra.sort(key=lambda b: uni[b].get("change24") or 0.0, reverse=True)
+            for b in extra[: int(CFG.get("broad_scan_top", 0))]:
+                t = uni[b]
+                candidates.append({"symbol": b, "name": b, "cmc_rank": None,
+                                   "price": t.get("price"), "cmc_change_24h": t.get("change24"),
+                                   "volume24h": t.get("vol24"), "candidate_src": "universe"})
+        except Exception as e:
+            print(f"[warn] broad universe scan failed ({e}); using CMC trending only")
+
+    def evaluate(c):
         base = (c.get("symbol") or "").upper()
         if not base or not base.isascii() or not base.isalnum():
             market = "none"
@@ -568,6 +605,7 @@ def main():
             "price": c.get("price"),
             "cmc_change_24h": c.get("cmc_change_24h"),
             "volume24h": c.get("volume24h"),
+            "candidate_src": c.get("candidate_src", "cmc"),
             "market": market,
             "exchanges": exchanges,
             "in_pairlist": base in pairlist,
@@ -603,7 +641,12 @@ def main():
                 row["reason"] = f"noisy: 5m range {row['noise_pct']:.2f}% > {mn}% (stop-prone)"
         else:
             row["reason"] = "no Binance market"
-        rows.append(row)
+        return row
+
+    # Fan the per-coin HTTP work out across threads — the pool can now be ~90 coins (trending +
+    # broad universe), not ~30, so a sequential loop would blow the 1-min cron budget.
+    with ThreadPoolExecutor(max_workers=max(1, SCAN_WORKERS)) as ex:
+        rows = list(ex.map(evaluate, candidates))
 
     # Sort: momentum coins first, then by score desc (unscored sink to the bottom).
     rows.sort(key=lambda r: (r["momentum"], r["score"] if r["score"] is not None else -1e9), reverse=True)
@@ -638,7 +681,7 @@ def main():
         "entry_price": r.get("price"), "score": r["score"],
         "cmc_change_24h": r.get("cmc_change_24h"), "early": r.get("early"),
         "early_signals": r.get("early_signals"), "exchanges": r.get("exchanges"),
-        "noise_pct": r.get("noise_pct"),
+        "noise_pct": r.get("noise_pct"), "candidate_src": r.get("candidate_src"),
     }) for r in rows if r.get("momentum") and r.get("price")]
     if new_lines:
         with open(picks_file, "a") as fh:
@@ -652,8 +695,10 @@ def main():
             pass
 
     hot = [r["coin"] for r in rows if r["momentum"]]
-    print(f"Wrote {OUT_FILE}: {len(rows)} trending coins, {out['count_momentum']} momentum "
-          f"(src={source}, w1h={CFG['weights'].get('1h')}), generated {out['generated_utc']}")
+    n_uni = sum(1 for r in rows if r.get("candidate_src") == "universe")
+    print(f"Wrote {OUT_FILE}: {len(rows)} candidates ({len(rows) - n_uni} trending + {n_uni} universe), "
+          f"{out['count_momentum']} momentum (src={source}, w1h={CFG['weights'].get('1h')}), "
+          f"generated {out['generated_utc']}")
     print(f"Momentum (uptrend, not post-pump): {', '.join(hot) if hot else '(none right now)'}")
 
 
