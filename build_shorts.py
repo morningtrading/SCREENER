@@ -58,7 +58,12 @@ _DEFAULTS = {
         "oi_min_pct": 0.5,              # OI rising while price falls -> new shorts/conviction
         "funding_min": 0.0,             # funding >= this (longs paying) -> room to fall
         "early_min_signals": 2, "early_weight": 0.2,
-        # reversal-risk (info + toggle, not a hard filter)
+        # reversal-risk: now an actionable EXCLUSION, not just an info toggle. The track record
+        # showed flagged shorts (squeeze-prone) hold every blow-up and are net-negative even with
+        # a tight stop, while clean shorts are strongly positive. "any" excludes high+low, "high"
+        # only the high-risk ones, "none" keeps the old info-only behaviour. Excluded coins still
+        # show on the page (with the ⚠ and the reason) but are not flagged SHORT or logged as picks.
+        "exclude_reversal_risk": "any",
         "rsi_period": 14, "rsi_oversold": 25.0,
         "max_drawdown_ext": 12.0,       # price > this% below its EMA = stretched (bounce-prone)
         "funding_squeeze": -0.0005,     # funding <= this = crowded shorts (squeeze risk)
@@ -364,6 +369,14 @@ def score_short(base, data_src, cfg, recent, micro):
     elif cfg["require_downtrend_alignment"] and not trend_down_4h:
         reason = "4h trend not down"
     short = reason == ""
+
+    # Reversal-risk exclusion: a weak coin that is also squeeze-prone is NOT an actionable short
+    # (it holds the blow-ups). Demote it — keep the row (page still shows it with ⚠ + reason) but
+    # drop the SHORT flag so it is neither green nor logged as a pick.
+    excl = cfg.get("exclude_reversal_risk", "any")
+    if short and ((excl == "any" and rlevel != "none") or (excl == "high" and rlevel == "high")):
+        short = False
+        reason = f"reversal risk: {rlevel}"
 
     return {
         "short_score": round(score, 3),

@@ -1803,9 +1803,14 @@ def _eval_table(d, side, token, settled=False) -> str:
         elif side == "long" and x == "early":
             tags.append('<span class="sig">EARLY</span>')
         if settled:
-            horizon = r.get("close_reason") == "horizon"
-            why = "reached the horizon" if horizon else "momentum flipped off"
-            tags.append(f'<span class="muted" title="closed: {why}">{"&#9201; horizon" if horizon else "&#10007; off"}</span>')
+            reason = r.get("close_reason")
+            # How the position closed: take-profit / stop / horizon-cap / momentum-flip.
+            label = {
+                "tp": ('<span class="up" title="closed: take-profit hit">&#127919; TP</span>'),
+                "stop": ('<span class="down" title="closed: hard stop-loss hit">&#9210; stop</span>'),
+                "horizon": ('<span class="muted" title="closed: reached the horizon">&#9201; horizon</span>'),
+            }.get(reason, '<span class="muted" title="closed: momentum flipped off">&#10007; off</span>')
+            tags.append(label)
         tval = r.get("held_hours" if settled else "age_hours", 0.0)
         trs.append(
             f"<tr><td>{coin_link(r['coin'], token)}</td>"
@@ -1865,7 +1870,9 @@ Evaluated {gen} UTC &middot; <b id="dataage">{age_txt}</b> min old
 <b>Settled</b>: closed, P&amp;L frozen at the exit. &nbsp;
 <b>Age</b> = hours since the call; <b>Held</b> = hours the position stayed open.
 <br>Exit reason (settled rows):
-<span class="muted">&#9201; horizon</span> = reached the <b>{horizon_txt}h</b> max hold (still trending, just capped for scoring); &nbsp;
+<span class="up">&#127919; TP</span> = take-profit hit; &nbsp;
+<span class="down">&#9210; stop</span> = hard stop-loss hit; &nbsp;
+<span class="muted">&#9201; horizon</span> = reached the <b>{horizon_txt}h</b> max hold (capped for scoring); &nbsp;
 <span class="muted">&#10007; off</span> = momentum flipped off &mdash; the screener stopped flagging it (no re-flag within the grace window).
 <br>Per-call tag:
 <span class="sig">EARLY</span> = the long fired the <b>early-detection</b> confluence at the call (the early leading-signal threshold); &nbsp;

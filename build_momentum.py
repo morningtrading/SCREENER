@@ -61,6 +61,8 @@ _DEFAULTS = {
         "spot_fallback": True,         # score coins via Binance spot when they have no perpetual
         "candidate_limit": 30,         # max trending coins to evaluate
         "snapshot_keep": 300,          # how many timestamped CMC snapshots to retain (~1 day at 5-min cron)
+        "max_noise_pct": None,         # max-noise entry gate: demote a long if its median 5m candle range exceeds this % (null = off)
+        "noise_bars": 12,              # 5m bars (≈1h) over which the median candle-range "noise" is measured
         "recent_windows_min": [5, 15, 30, 45],  # rolling % change windows (from 5m candles) for the dot strip
         # --- Early-detection leading signals (Tier 1 + OI/funding) ---
         "buy_ratio_bars": 6,           # 5m bars for the taker-buy ratio (aggressive demand)
@@ -301,7 +303,7 @@ def recent_changes(base, market, cfg):
     need = max(max(bars) + 1, cfg.get("rvol_recent_bars", 3) + cfg.get("rvol_base_bars", 20), cfg.get("buy_ratio_bars", 6))
     kl = fetch_klines(base, market, "5m", need + 2)
     if not kl or len(kl["close"]) < max(bars) + 1:
-        return {"windows": {}, "buy_ratio": None, "rvol": None}
+        return {"windows": {}, "buy_ratio": None, "rvol": None, "noise_pct": None}
     closes, vol, tbv = kl["close"], kl["vol"], kl["tbv"]
     last = closes[-1]
     win = {}
@@ -320,7 +322,21 @@ def recent_changes(base, market, cfg):
         base_v = sum(vol[-(rn + bn):-rn]) / bn
         rvol = round(recent_v / base_v, 2) if base_v > 0 else None
 
-    return {"windows": win, "buy_ratio": buy_ratio, "rvol": rvol}
+    # Noise = the coin's typical 5m candle range (median of (high-low)/close over the last
+    # `noise_bars` bars). It proxies how wide the natural wiggle is: when noise exceeds the long
+    # hard-stop, the stop gets hit by chop, not by a real reversal — the thin-but-high-volume
+    # micro-caps (KAT, SLX, VELVET…) that dominate the long stop-outs. Used as a max-noise entry
+    # gate (see max_noise_pct) and logged on each pick so it can be evaluated/tuned later.
+    noise_pct = None
+    hi, lo = kl.get("high"), kl.get("low")
+    if hi and lo:
+        nbars = max(1, int(cfg.get("noise_bars", 12)))
+        ranges = [(h - l) / c * 100.0 for h, l, c in zip(hi[-nbars:], lo[-nbars:], closes[-nbars:]) if c > 0]
+        if ranges:
+            ranges.sort()
+            noise_pct = round(ranges[len(ranges) // 2], 3)     # median bar range %
+
+    return {"windows": win, "buy_ratio": buy_ratio, "rvol": rvol, "noise_pct": noise_pct}
 
 
 def regime_for(base, market, cfg):
@@ -560,10 +576,12 @@ def main():
             "recent": {}, "recent_mom": None,
             "buy_ratio": None, "rvol": None, "accel_1h": None, "breakout": False,
             "oi_change": None, "funding": None, "early_signals": [], "early": False,
+            "noise_pct": None,
         }
         if market != "none":
             rec = recent_changes(base, market, CFG)
             row["recent"] = rec.get("windows", {})
+            row["noise_pct"] = rec.get("noise_pct")
             micro = {
                 "buy_ratio": rec.get("buy_ratio"),
                 "rvol": rec.get("rvol"),
@@ -575,6 +593,14 @@ def main():
                 row["reason"] = "no/short candles"
             else:
                 row.update(res)
+            # Max-noise entry gate: a coin whose typical 5m range is wider than `max_noise_pct`
+            # gets noise-stopped before its move resolves, so it is not actionable as a long even
+            # when momentum scores. Demote it (drop the green flag) rather than dropping the row,
+            # so it still shows on the page with the reason. Off when max_noise_pct is null.
+            mn = CFG.get("max_noise_pct")
+            if row.get("momentum") and mn and row.get("noise_pct") is not None and row["noise_pct"] > mn:
+                row["momentum"] = False
+                row["reason"] = f"noisy: 5m range {row['noise_pct']:.2f}% > {mn}% (stop-prone)"
         else:
             row["reason"] = "no Binance market"
         rows.append(row)
@@ -612,6 +638,7 @@ def main():
         "entry_price": r.get("price"), "score": r["score"],
         "cmc_change_24h": r.get("cmc_change_24h"), "early": r.get("early"),
         "early_signals": r.get("early_signals"), "exchanges": r.get("exchanges"),
+        "noise_pct": r.get("noise_pct"),
     }) for r in rows if r.get("momentum") and r.get("price")]
     if new_lines:
         with open(picks_file, "a") as fh:

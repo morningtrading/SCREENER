@@ -300,6 +300,45 @@ the reversal-risk thresholds: `rsi_oversold`, `funding_squeeze`, `bounce_pct`, `
 
 > Note: MEXC klines carry no taker-buy data, so the **SELL** signal only applies to Binance-scored coins.
 
+> **Reversal-risk is now an exclusion, not just a toggle.** `shorts.exclude_reversal_risk` (`"any"`
+> | `"high"` | `"none"`, default `"any"`) drops squeeze-prone coins from the actionable SHORT list
+> entirely — they still show on the page with the ⚠ and a reason, but are no longer flagged green or
+> logged as picks. Back-testing the track record showed the flagged bucket holds **every** −8% blow-up
+> and is net-negative even with a tight stop, while clean shorts are strongly positive.
+
+## Track-record tuning — `config.json` (`"eval"`)
+
+`build_eval.py` replays each pick against the price path and is fully config-driven. The exit policy
+is where the long/short asymmetry lives (tuned from the `/results` track record):
+
+```json
+"eval": {
+  "horizon_hours": 4.0,
+  "flip_grace_min": 15,
+  "stop_loss_pct":        { "long": -2.0, "short": -8.0 },
+  "reversal_risk_stop_pct": null,
+  "exclude_reversal_risk":  true,
+  "exit_on_flip":         { "long": true, "short": false },
+  "take_profit_pct":      { "long": 3.0,  "short": null }
+}
+```
+
+- **`stop_loss_pct`** — per-side hard stop (% P&L), filled intra-candle on the adverse wick. Longs need
+  a tight stop; shorts need a wide one (they squeeze) — a uniform stop kills the short edge.
+- **`take_profit_pct`** — per-side TP, filled on the favorable wick. Longs spike then fade, so a `+3%`
+  TP banks the move; shorts have **no** TP (a fixed cap would clip the big horizon-held winners).
+- **`exit_on_flip`** — whether a side closes when the screener stops re-flagging it. Shorts are held to
+  the horizon (`false`) because their winners are horizon-held while flip exits net ~0%.
+- **`exclude_reversal_risk`** — drop reversal-risk-flagged shorts from the track record (matches the
+  live `shorts.exclude_reversal_risk` policy). **`reversal_risk_stop_pct`** is the milder alternative
+  (a tighter stop for flagged shorts instead of excluding them); exclusion tested better.
+
+A single number for `stop_loss_pct` / `take_profit_pct` / `exit_on_flip` applies to both sides; the
+per-side `{"long": .., "short": ..}` form is the intended one. The long **max-noise entry gate**
+(`momentum.max_noise_pct`, default `2.0`) is the long-side complement: it demotes a momentum coin whose
+median 5m candle range is wider than the stop, since those names get noise-stopped before the move
+resolves. Each long pick now logs its `noise_pct` so the gate can be tuned from real data.
+
 ## Note on ports
 
 The dashboard defaults to port **8000**. To run a second instance alongside it,

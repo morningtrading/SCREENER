@@ -27,6 +27,8 @@
     "spot_fallback": true,
     "candidate_limit": 30,
     "snapshot_keep": 300,
+    "max_noise_pct": 2.0,
+    "noise_bars": 12,
     "recent_windows_min": [5, 15, 30, 45],
 
     "buy_ratio_bars": 6,
@@ -50,7 +52,11 @@
   "eval": {
     "horizon_hours": 4.0,
     "flip_grace_min": 15,
-    "stop_loss_pct": { "long": -2.0, "short": -8.0 }
+    "stop_loss_pct": { "long": -2.0, "short": -8.0 },
+    "reversal_risk_stop_pct": null,
+    "exclude_reversal_risk": true,
+    "exit_on_flip": { "long": true, "short": false },
+    "take_profit_pct": { "long": 3.0, "short": null }
   },
   "shorts": {
     "timeframes": ["1h", "2h", "4h"],
@@ -75,6 +81,7 @@
     "oi_min_pct": 0.5,
     "funding_min": 0.0,
     "early_min_signals": 2, "early_weight": 0.2,
+    "exclude_reversal_risk": "any",
     "rsi_period": 14, "rsi_oversold": 25.0,
     "max_drawdown_ext": 12.0,
     "funding_squeeze": -0.0005,

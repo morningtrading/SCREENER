@@ -37,7 +37,30 @@ SPARK_POINTS = 48          # max points kept per row sparkline
 # differently — a tight stop helps longs but stops out short bounces before they resolve — so
 # the per-side form is the intended one.
 CONFIG_FILE = Path(os.environ.get("SCREENER_CONFIG", str(BASE / "config.json")))
-_EVAL_DEFAULTS = {"horizon_hours": 4.0, "flip_grace_min": 15.0, "stop_loss_pct": None}
+_EVAL_DEFAULTS = {
+    "horizon_hours": 4.0,
+    "flip_grace_min": 15.0,
+    "stop_loss_pct": None,
+    # Tighter hard stop (% P&L) for SHORT picks that carried reversal risk at the call
+    # (reversal_risk != "none"). Those names squeeze — the analysis showed they hold every
+    # -8% blow-up while clean shorts are net positive. Null => no special handling (flagged
+    # shorts use the normal short stop). Applies only to shorts.
+    "reversal_risk_stop_pct": None,
+    # Drop reversal-risk-flagged SHORT picks from the track record entirely (models simply
+    # not trading them). The flagged bucket is net-negative even with a tight stop, so
+    # exclusion is the higher-value policy. Applies only to shorts.
+    "exclude_reversal_risk": False,
+    # Whether a position closes when the screener stops re-flagging it ("flip"). When false for
+    # a side, the position is held to the horizon (or stop) regardless of flip — the short-side
+    # winners are horizon-held while flip exits net ~0%, so letting shorts run captures more of
+    # the downtrend. Bool (both sides) or per-side {"long": .., "short": ..}.
+    "exit_on_flip": True,
+    # Take-profit level (% P&L). Fills intra-candle on the FAVORABLE wick (the high for a long,
+    # the low for a short), the mirror of the stop. Longs spike fast then fade, so a TP banks the
+    # move before flip/horizon hands it back. Null (no TP), a single number (both sides), or
+    # per-side {"long": .., "short": ..}. Shorts intentionally have no TP (let winners run).
+    "take_profit_pct": None,
+}
 
 
 def load_eval_config():
@@ -57,6 +80,31 @@ def sl_for(side):
     """Hard-stop level (% P&L) for a side, or None if no stop. Accepts a single number
     (both sides) or a per-side {"long": .., "short": ..} mapping in eval.stop_loss_pct."""
     v = ECFG.get("stop_loss_pct")
+    return v.get(side) if isinstance(v, dict) else v
+
+
+def effective_sl(side, entry):
+    """Per-pick hard stop. Same as sl_for(side), except a reversal-risk-flagged SHORT uses the
+    tighter `reversal_risk_stop_pct` when configured (the nearer-zero of the two stops)."""
+    base = sl_for(side)
+    if side == "short" and entry.get("reversal_risk", "none") != "none":
+        rr = ECFG.get("reversal_risk_stop_pct")
+        if rr is not None:
+            return rr if base is None else max(base, rr)   # both negative; max = nearer 0 = tighter
+    return base
+
+
+def flip_exit_for(side):
+    """Whether `side` closes a position when the screener stops re-flagging it. Accepts a bool
+    (both sides) or a per-side {"long": .., "short": ..} mapping in eval.exit_on_flip."""
+    v = ECFG.get("exit_on_flip")
+    return v.get(side, True) if isinstance(v, dict) else v
+
+
+def tp_for(side):
+    """Take-profit level (% P&L) for a side, or None. Accepts a single number (both sides) or a
+    per-side {"long": .., "short": ..} mapping in eval.take_profit_pct."""
+    v = ECFG.get("take_profit_pct")
     return v.get(side) if isinstance(v, dict) else v
 
 
@@ -117,19 +165,21 @@ def split_episodes(picks, grace_s):
     return eps
 
 
-def episode_close(ep, now, horizon_h, grace_s):
+def episode_close(ep, now, horizon_h, grace_s, flip_exit=True):
     """When (and why) one episode closes — (close_dt | None, reason).
 
     The episode is OPEN while the screener keeps re-flagging it. It closes at the EARLIER of:
       - "flip":    the screener stopped re-flagging it (last flag + grace has passed), or
       - "horizon": `horizon_h` hours after the episode's entry.
+    When `flip_exit` is False the flip path is disabled — the position is held to the horizon
+    (or stop) regardless of whether the screener keeps re-flagging it.
     close_dt None => still open ("open").
     """
     entry_dt = parse_ts(ep[0]["ts"])
     ep_end = parse_ts(ep[-1]["ts"])
     horizon_close = entry_dt + timedelta(hours=horizon_h)
     cands = []
-    if (now - ep_end).total_seconds() > grace_s:     # no longer being re-flagged
+    if flip_exit and (now - ep_end).total_seconds() > grace_s:     # no longer being re-flagged
         cands.append((ep_end, "flip"))
     if now >= horizon_close:
         cands.append((horizon_close, "horizon"))
@@ -145,13 +195,18 @@ def pnl_of(entry, price, side):
 def evaluate(path, side, now, horizon_h, grace_s):
     open_rows, settled_rows, series = [], [], {}
     now_ms = int(now.timestamp() * 1000)
-    sl = sl_for(side)     # per-side hard stop (% P&L), or None
+    flip_exit = flip_exit_for(side)     # does this side close on momentum-flip, or ride to horizon?
     for c, picks in coin_picks(path).items():
         for ep in split_episodes(picks, grace_s):     # each flagged run is its own position
             entry = ep[0]
             entry_price = entry.get("entry_price")
             if not entry_price:
                 continue
+            # Exclude reversal-risk-flagged shorts from the track record (policy: don't trade them).
+            if (side == "short" and ECFG.get("exclude_reversal_risk")
+                    and entry.get("reversal_risk", "none") != "none"):
+                continue
+            sl = effective_sl(side, entry)     # per-pick hard stop (% P&L), or None
             src = "mexc" if entry.get("data_src") == "mexc" else "binance"
             entry_dt = parse_ts(entry["ts"])
             # Floor to the 15m candle boundary so the entry's own candle is included right away
@@ -165,35 +220,42 @@ def evaluate(path, side, now, horizon_h, grace_s):
             ohlc = [k for k in ohlc if k[0] <= now_ms]
             if not ohlc:
                 continue
-            close_dt, reason = episode_close(ep, now, horizon_h, grace_s)
+            close_dt, reason = episode_close(ep, now, horizon_h, grace_s, flip_exit)
             close_ms = int(close_dt.timestamp() * 1000) if close_dt else None
             # Settled position: freeze the path (and the exit price) at the close time.
             kept = [k for k in ohlc if close_ms is None or k[0] <= close_ms] or ohlc[:1]
 
-            # Hard stop-loss (per-side level `sl`): a real stop fills intra-candle on the
-            # adverse wick — the LOW for a long, the HIGH for a short. The first candle that
-            # breaches `sl` closes the position right there at the stop price. This can settle
-            # a position the screener still re-flags as open, and overrides flip/horizon.
-            stop_ms = None
-            if sl is not None:
-                for t, hi, lo, _cl in kept:
-                    adverse = lo if side == "long" else hi
-                    if adverse > 0 and pnl_of(entry_price, adverse, side) <= sl:
-                        stop_ms = t
-                        break
+            # Intra-candle exits — hard stop-loss (`sl`) and take-profit (`tp`), both filled on
+            # the wick the way a real bracket order does: the stop on the ADVERSE wick (low for a
+            # long, high for a short), the TP on the FAVORABLE wick (high for a long, low for a
+            # short). The first candle to breach either level closes the position right there, at
+            # the level's exact price — this can settle a position the screener still re-flags as
+            # open, and overrides flip/horizon. When a single candle breaches both, the stop wins
+            # (conservative: assume the adverse move filled first).
+            tp = tp_for(side)
+            exit_event = None     # (ts_ms, reason, level_pct)
+            for t, hi, lo, _cl in kept:
+                adverse = lo if side == "long" else hi
+                favor = hi if side == "long" else lo
+                if sl is not None and adverse > 0 and pnl_of(entry_price, adverse, side) <= sl:
+                    exit_event = (t, "stop", sl)
+                    break
+                if tp is not None and favor > 0 and pnl_of(entry_price, favor, side) >= tp:
+                    exit_event = (t, "tp", tp)
+                    break
 
-            if stop_ms is not None:
-                kept = [k for k in kept if k[0] <= stop_ms]
-                # exit price that yields exactly `sl` for this side
-                exit_price = (entry_price * (1 + sl / 100.0) if side == "long"
-                              else entry_price / (1 + sl / 100.0))
-                pnl = round(sl, 2)
-                reason = "stop"
-                close_dt = datetime.fromtimestamp(stop_ms / 1000.0, tz=timezone.utc)
-                close_ms = stop_ms
-                # path = closes up to the stop candle, then the stop fill itself as the last point
+            if exit_event is not None:
+                ev_ms, reason, level = exit_event
+                kept = [k for k in kept if k[0] <= ev_ms]
+                # exit price that yields exactly `level` for this side
+                exit_price = (entry_price * (1 + level / 100.0) if side == "long"
+                              else entry_price / (1 + level / 100.0))
+                pnl = round(level, 2)
+                close_dt = datetime.fromtimestamp(ev_ms / 1000.0, tz=timezone.utc)
+                close_ms = ev_ms
+                # path = closes up to the exit candle, then the bracket fill itself as the last point
                 path_pnl = [(t, round(pnl_of(entry_price, cl, side), 3)) for t, _h, _l, cl in kept[:-1] if cl > 0]
-                path_pnl.append((stop_ms, round(sl, 3)))
+                path_pnl.append((ev_ms, round(level, 3)))
             else:
                 # P&L-since-call path (signed by side: rising = the position is winning)
                 path_pnl = [(t, round(pnl_of(entry_price, cl, side), 3)) for t, _h, _l, cl in kept if cl > 0]
