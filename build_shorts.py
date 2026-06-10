@@ -373,7 +373,8 @@ def score_short(base, data_src, cfg, recent, micro):
         bucket_w["recent"] = weights["recent"]
         bucket_v["recent"] = -rec_mom            # falling recently = weakness
     wsum = sum(bucket_w.values()) or 1.0
-    score = sum(bucket_w[k] * bucket_v[k] for k in bucket_w) / wsum
+    weakness_score = sum(bucket_w[k] * bucket_v[k] for k in bucket_w) / wsum
+    score = weakness_score
 
     # breakdown acceleration: within a confirmed 4h downtrend, reward a quickening fall
     accel = 0.0
@@ -381,10 +382,26 @@ def score_short(base, data_src, cfg, recent, micro):
         pace = [x for x in (recent.get("5m"), recent.get("15m")) if x is not None]
         if pace:
             accel = -sum(pace) / len(pace)
-    score += cfg.get("accel_weight", 0.0) * accel
+    accel_contrib = cfg.get("accel_weight", 0.0) * accel
+    score += accel_contrib
 
     fired, det = breakdown_signals(kl_tf.get("1h"), micro, cfg)
-    score += cfg.get("early_weight", 0.0) * len(fired)
+    breakdown_contrib = cfg.get("early_weight", 0.0) * len(fired)
+    score += breakdown_contrib
+
+    # Decomposition of the final short_score for the eval/track-record analysis: the three
+    # additive parts (weakness + accel + breakdown ≈ short_score) plus the per-timeframe weakness
+    # contributions. Logged per pick so a later study can correlate each component — not just the
+    # composite — against realized P&L. (The composite is anti-correlated with short profit; this
+    # is what lets us find WHICH term is pointing the wrong way.) Info-only: does not affect scoring.
+    components = {
+        "weakness_score": round(weakness_score, 4),
+        "accel_contrib": round(accel_contrib, 4),
+        "breakdown_contrib": round(breakdown_contrib, 4),
+        "weakness_tf": {k: round(bucket_v[k], 4) for k in bucket_v},
+        "weights_tf": {k: round(bucket_w[k], 4) for k in bucket_w},
+        "n_breakdown_signals": len(fired),
+    }
 
     ext_1h = per_tf["1h"]["extension"]
     last_1h = per_tf["1h"]["last_bar"]
@@ -427,6 +444,7 @@ def score_short(base, data_src, cfg, recent, micro):
         "risk_reasons": rreasons,
         "roc": {tf: round(per_tf[tf]["roc"], 2) for tf in avail},
         "trend": {tf: bool(per_tf[tf]["trend_down"]) for tf in avail},
+        "components": components,
         "data_src": data_src,
     }
 
@@ -526,6 +544,13 @@ def main():
         "entry_price": r.get("price"), "short_score": r["short_score"],
         "reversal_risk": r["reversal_risk"], "change24_at_call": round(r["change24"], 2),
         "rsi": r.get("rsi"), "funding": r.get("funding"), "exchanges": r.get("exchanges"),
+        # Score components + raw signals, logged so the track-record study can decompose which
+        # part of short_score drives (or fights) realized P&L — see score_short()'s `components`.
+        "components": r.get("components"),
+        "extension_1h": r.get("extension_1h"), "last_bar_1h": r.get("last_bar_1h"),
+        "rvol": r.get("rvol"), "buy_ratio": r.get("buy_ratio"),
+        "oi_change": r.get("oi_change"), "breakdown": r.get("breakdown"),
+        "roc": r.get("roc"),
     }) for r in rows if r.get("short") and r.get("price")]
     if new_lines:
         with open(picks_file, "a") as fh:

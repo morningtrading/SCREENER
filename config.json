@@ -82,7 +82,7 @@
     "funding_min": 0.0,
     "early_min_signals": 2, "early_weight": 0.2,
     "exclude_reversal_risk": "any",
-    "rsi_period": 14, "rsi_oversold": 25.0,
+    "rsi_period": 14, "rsi_oversold": 40.0,
     "max_drawdown_ext": 12.0,
     "funding_squeeze": -0.0005,
     "bounce_pct": 1.5,
