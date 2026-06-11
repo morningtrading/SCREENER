@@ -15,7 +15,7 @@ Generated after the 2026-06-11 overnight analysis session. Based on backtests ov
 ---
 
 ## P1 — Fix the inverted score core
-**Status:** not started — needs shadow-score phase first (selection bias risk)
+**Status:** ✅ Phase 1 shipped (commit e7d9126, 2026-06-11) — shadow_score logging live. Validate after 7 days of pick data.
 
 Reweight weakness_tf toward 4h, boost accel_contrib, add buy_ratio. Cannot flip live without shadow-testing because the backtest only sees picks the current filter allowed.
 
@@ -24,7 +24,7 @@ Reweight weakness_tf toward 4h, boost accel_contrib, add buy_ratio. Cannot flip 
 ---
 
 ## P2 — Log rejected candidates (kill selection bias)
-**Status:** not started — highest-urgency logging task (clock starts when deployed)
+**Status:** ✅ Shipped (commit 5b8c19d, 2026-06-11) — rejected_picks.jsonl logging live.
 
 Every current backtest studies only trades the filter *allowed*. Logging near-misses makes all future studies trustworthy and is required to safely validate P1.
 
@@ -42,7 +42,7 @@ Average settled short = +0.68%; round-trip taker fee ~0.04–0.1%; shorts hold 4
 ---
 
 ## P4 — rvol floor at 0.5 + min volume floor
-**Status:** not started — evidence in hand, safe to ship
+**Status:** ✅ rvol_floor:0.5 shipped (commit 5b8c19d, 2026-06-11). Min volume floor for shorts not yet added (longs already have 2M USDT — shorts share min_volume_usdt from the same config).
 
 `rvol_min: 1.8` only adds a reason, never rejects. rvol < 0.5 bucket: 40% WR, −0.44% avg (n=25). Shorts also have no notional volume floor; longs require 2M USDT.
 
@@ -60,7 +60,7 @@ RSI changed 25→40→42 in three days, each tuned on the same window that propo
 ---
 
 ## P6 — Log BTC 3h ROC for dump-suppressor study
-**Status:** not started — logging only, clock starts when deployed
+**Status:** ✅ Shipped (commit 5b8c19d, 2026-06-11) — btc_roc_3h in every pick. Validate dump-suppressor gate after ≥14 days.
 
 BTC down >1%/3h → 44% WR, −0.30% avg (n=75, coherent mechanism: shorting into capitulation bounce). Needs ≥2 weeks more data before gating.
 
