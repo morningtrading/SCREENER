@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """
-Momentum screener: CoinMarketCap trending  ×  Binance 1h/2h/4h candles.
+Momentum screener: full MEXC+HL perp universe  ×  Binance 1h/2h/4h candles.
 
 Pipeline:
-  1. Scrape CMC's trending list (the candidate set the market is watching).
-  2. For each trending coin with a Binance market, pull 1h / 2h / 4h klines.
+  1. Fetch the full MEXC+HL perp universe, sort by 24h strength, take the top N.
+  2. For each candidate with a Binance market, pull 1h / 2h / 4h klines.
   3. Score momentum with a strong weight on 1h (all weights/thresholds in config.json).
   4. Flag coins in a genuine UPTREND, not a post-pump blow-off (overextension and
      single-candle-spike guards + higher-timeframe confirmation).
 
-Writes momentum_ranking.json for the data server (/momentum). Also stores each raw CMC
-snapshot under momentum/ so trending membership can be compared over time.
+Writes momentum_ranking.json for the data server (/momentum).
 
 No third-party deps — stdlib urllib/json only (same style as build_binance_ranking.py).
 """
@@ -29,13 +28,6 @@ SCAN_WORKERS = int(os.environ.get("MOM_SCAN_WORKERS", "10"))
 
 BASE = Path(__file__).resolve().parent
 OUT_FILE = BASE / "momentum_ranking.json"
-SNAP_DIR = BASE / "momentum"
-
-# CMC trending: the same data-API endpoint the website itself calls (no key needed).
-CMC_URL = "https://api.coinmarketcap.com/data-api/v3/topsearch/rank"
-# Optional official Pro API (used only if SCREENER_CMC_API_KEY is set).
-CMC_PRO_URL = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/trending/latest"
-CMC_API_KEY = os.environ.get("SCREENER_CMC_API_KEY", "").strip()
 
 FAPI = "https://fapi.binance.com/fapi/v1"          # USDⓈ-M futures
 SAPI = "https://api.binance.com/api/v3"            # spot (fallback)
@@ -65,11 +57,8 @@ _DEFAULTS = {
         "min_score": 1.0,              # min composite score to flag as momentum
         "require_uptrend_alignment": True,  # require the 4h trend to confirm (not just a 1h blip)
         "spot_fallback": True,         # score coins via Binance spot when they have no perpetual
-        "candidate_limit": 30,         # max trending coins to evaluate
-        "broad_universe": True,        # also scan the full MEXC+HL perp universe (mirror of the shorts screener), not just CMC trending
-        "broad_scan_top": 30,          # deep-score the N strongest (by 24h change) universe perps, on top of trending
-        "broad_min_volume_usdt": 2000000,  # min 24h volume for a universe coin to enter the broad shortlist
-        "snapshot_keep": 300,          # how many timestamped CMC snapshots to retain (~1 day at 5-min cron)
+        "broad_scan_top": 60,          # deep-score the N strongest (by 24h change) perps from the MEXC+HL universe
+        "broad_min_volume_usdt": 2000000,  # min 24h volume for a coin to enter the shortlist
         "max_noise_pct": None,         # max-noise entry gate: demote a long if its median 5m candle range exceeds this % (null = off)
         "noise_bars": 12,              # 5m bars (≈1h) over which the median candle-range "noise" is measured
         "recent_windows_min": [5, 15, 30, 45],  # rolling % change windows (from 5m candles) for the dot strip
@@ -113,40 +102,6 @@ def get_json(url, headers=None):
     req = urllib.request.Request(url, headers=headers or {"User-Agent": UA})
     with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
         return json.loads(r.read().decode())
-
-
-# ----------------------------------------------------------------------------- CMC scrape
-def fetch_trending():
-    """Return (rows, source) where rows is a list of dicts with coin/cmc fields."""
-    if CMC_API_KEY:
-        try:
-            d = get_json(CMC_PRO_URL, headers={"X-CMC_PRO_API_KEY": CMC_API_KEY, "Accept": "application/json"})
-            out = []
-            for c in d.get("data", []):
-                q = (c.get("quote") or {}).get("USD", {})
-                out.append({
-                    "symbol": c.get("symbol"), "name": c.get("name"), "slug": c.get("slug"),
-                    "cmc_rank": c.get("cmc_rank"), "price": q.get("price"),
-                    "cmc_change_24h": q.get("percent_change_24h"),
-                    "cmc_change_7d": q.get("percent_change_7d"),
-                    "volume24h": q.get("volume_24h"), "market_cap": q.get("market_cap"),
-                })
-            return out, "cmc_pro_api"
-        except Exception as e:
-            print(f"[warn] CMC Pro API failed ({e}); falling back to public data-API")
-    d = get_json(CMC_URL)
-    rows = (d.get("data") or {}).get("cryptoTopSearchRanks") or []
-    out = []
-    for c in rows:
-        pc = c.get("priceChange") or {}
-        out.append({
-            "symbol": c.get("symbol"), "name": c.get("name"), "slug": c.get("slug"),
-            "cmc_rank": c.get("rank"), "price": pc.get("price"),
-            "cmc_change_24h": pc.get("priceChange24h"),
-            "cmc_change_7d": pc.get("priceChange7d"),
-            "volume24h": pc.get("volume24h"), "market_cap": c.get("marketCap"),
-        })
-    return out, "cmc_data_api"
 
 
 # --------------------------------------------------------------------------- Binance data
@@ -516,26 +471,6 @@ def score_coin(base, market, cfg, recent=None, micro=None):
 
 # ----------------------------------------------------------------------------------- main
 def main():
-    SNAP_DIR.mkdir(exist_ok=True)
-    try:
-        trending, source = fetch_trending()
-    except Exception as e:
-        print(f"[error] could not fetch CMC trending ({e}); keeping last momentum_ranking.json")
-        raise SystemExit(1)
-
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    (SNAP_DIR / f"cmc_trending_{stamp}.json").write_text(json.dumps(trending, indent=2))
-    (SNAP_DIR / "cmc_trending_latest.json").write_text(json.dumps(trending, indent=2))
-    # Keep history bounded (cron runs every 5 min): retain only the newest N timestamped snapshots.
-    keep = max(1, int(CFG.get("snapshot_keep", 300)))
-    snaps = sorted(SNAP_DIR.glob("cmc_trending_2*.json"))  # excludes cmc_trending_latest.json
-    for old in snaps[:-keep]:
-        try:
-            old.unlink()
-        except OSError:
-            pass
-
-    trending = trending[: CFG["candidate_limit"]]
     perp = futures_perp_bases()
     spot = spot_symbols() if CFG["spot_fallback"] else set()
     mexc = mexc_bases()        # which trending coins are also listed on MEXC perps
@@ -549,34 +484,30 @@ def main():
     except Exception:
         pass
 
-    # Candidate pool. CMC trending is the coins the market is *watching* — a narrow (~10-30)
-    # list that goes empty in a broad sell-off. Mirror the shorts screener: also pull the full
-    # MEXC+HL perp universe, rank it by 24h strength, and deep-score the strongest, so a coin
-    # bucking a weak tape is found even when CMC isn't featuring it. The uptrend/extension gates
-    # in score_coin still decide what actually flags. broad_universe:false => trending only.
-    candidates = list(trending)
-    if CFG.get("broad_universe"):
-        try:
-            import build_shorts as bs   # lazy: avoids a circular import at module load
-            uni = {}
-            for src in (bs.mexc_universe(), bs.hl_universe()):
-                for b, t in src.items():
-                    # keep the higher-volume ticker when a coin is on both venues
-                    if b not in uni or (t.get("vol24") or 0) > (uni[b].get("vol24") or 0):
-                        uni[b] = t
-            have = {(c.get("symbol") or "").upper() for c in trending}
-            min_vol = CFG.get("broad_min_volume_usdt", 0) or 0
-            extra = [b for b, t in uni.items()
-                     if b and b not in have and (t.get("vol24") or 0) >= min_vol]
-            # strongest first (most up on the day); the deep score rejects post-pump blow-offs
-            extra.sort(key=lambda b: uni[b].get("change24") or 0.0, reverse=True)
-            for b in extra[: int(CFG.get("broad_scan_top", 0))]:
-                t = uni[b]
-                candidates.append({"symbol": b, "name": b, "cmc_rank": None,
-                                   "price": t.get("price"), "cmc_change_24h": t.get("change24"),
-                                   "volume24h": t.get("vol24"), "candidate_src": "universe"})
-        except Exception as e:
-            print(f"[warn] broad universe scan failed ({e}); using CMC trending only")
+    # Candidate pool: full MEXC+HL perp universe, ranked by 24h strength, top N deep-scored.
+    # The uptrend/extension gates in score_coin decide what actually flags as momentum.
+    candidates = []
+    try:
+        import build_shorts as bs   # lazy: avoids a circular import at module load
+        uni = {}
+        for src in (bs.mexc_universe(), bs.hl_universe()):
+            for b, t in src.items():
+                # keep the higher-volume ticker when a coin is on both venues
+                if b not in uni or (t.get("vol24") or 0) > (uni[b].get("vol24") or 0):
+                    uni[b] = t
+        min_vol = CFG.get("broad_min_volume_usdt", 0) or 0
+        extra = [b for b, t in uni.items()
+                 if b and (t.get("vol24") or 0) >= min_vol]
+        # strongest first (most up on the day); the deep score rejects post-pump blow-offs
+        extra.sort(key=lambda b: uni[b].get("change24") or 0.0, reverse=True)
+        for b in extra[: int(CFG.get("broad_scan_top", 60))]:
+            t = uni[b]
+            candidates.append({"symbol": b, "name": b,
+                               "price": t.get("price"), "change24": t.get("change24"),
+                               "volume24h": t.get("vol24"), "candidate_src": "universe"})
+    except Exception as e:
+        print(f"[error] universe scan failed ({e}); aborting")
+        raise SystemExit(1)
 
     def evaluate(c):
         base = (c.get("symbol") or "").upper()
@@ -601,11 +532,10 @@ def main():
         row = {
             "coin": base or (c.get("name") or "?"),
             "name": c.get("name"),
-            "cmc_rank": c.get("cmc_rank"),
             "price": c.get("price"),
-            "cmc_change_24h": c.get("cmc_change_24h"),
+            "change24": c.get("change24"),
             "volume24h": c.get("volume24h"),
-            "candidate_src": c.get("candidate_src", "cmc"),
+            "candidate_src": c.get("candidate_src", "universe"),
             "market": market,
             "exchanges": exchanges,
             "in_pairlist": base in pairlist,
@@ -662,7 +592,6 @@ def main():
 
     out = {
         "generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "source": source,
         "config": CFG,
         "regime": regime,
         "total": len(rows),
@@ -679,7 +608,7 @@ def main():
     new_lines = [json.dumps({
         "ts": out["generated_utc"], "coin": r["coin"], "market": r.get("market"),
         "entry_price": r.get("price"), "score": r["score"],
-        "cmc_change_24h": r.get("cmc_change_24h"), "early": r.get("early"),
+        "change24": r.get("change24"), "early": r.get("early"),
         "early_signals": r.get("early_signals"), "exchanges": r.get("exchanges"),
         "noise_pct": r.get("noise_pct"), "candidate_src": r.get("candidate_src"),
     }) for r in rows if r.get("momentum") and r.get("price")]
@@ -695,10 +624,8 @@ def main():
             pass
 
     hot = [r["coin"] for r in rows if r["momentum"]]
-    n_uni = sum(1 for r in rows if r.get("candidate_src") == "universe")
-    print(f"Wrote {OUT_FILE}: {len(rows)} candidates ({len(rows) - n_uni} trending + {n_uni} universe), "
-          f"{out['count_momentum']} momentum (src={source}, w1h={CFG['weights'].get('1h')}), "
-          f"generated {out['generated_utc']}")
+    print(f"Wrote {OUT_FILE}: {len(rows)} candidates, {out['count_momentum']} momentum "
+          f"(w1h={CFG['weights'].get('1h')}), generated {out['generated_utc']}")
     print(f"Momentum (uptrend, not post-pump): {', '.join(hot) if hot else '(none right now)'}")
 
 

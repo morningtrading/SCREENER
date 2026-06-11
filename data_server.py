@@ -777,7 +777,7 @@ NAV_ITEMS = [
     ("/", "Home", ("Dashboard home", "Server, bot & data status", "Jump to any section")),
     ("/summary", "Data Summary", ("Per-pair market screener", "Volume · spread · volatility filters", "The raw data table")),
     ("/combined", "Combined", ("Select on MEXC, backtest on Binance", "Cross-exchange shortlist", "Spread & fee aware")),
-    ("/momentum", "Long", ("CMC trending × Binance 1h/2h/4h", "Coins in a real uptrend, not post-pump", "Early-detection leading signals")),
+    ("/momentum", "Long", ("MEXC+HL universe × Binance 1h/2h/4h", "Coins in a real uptrend, not post-pump", "Early-detection leading signals")),
     ("/shorts", "Shorts", ("Weak, liquid perps to short", "Downtrend score + reversal-risk flags", "Funding / OI aware")),
     ("/results", "Results", ("Track record — were the calls right?", "Entry vs price · open + settled", "Equity curves & per-pick P&L")),
     ("/summary.json", "Raw JSON", ("The summary data as JSON", "For scripts & API access", "Token-authenticated endpoint")),
@@ -1249,7 +1249,7 @@ async def mexc_good_pairs(request: Request):
     return JSONResponse({"pairs": pairs, "count": len(pairs), "generated_utc": data.get("generated_utc")})
 
 
-# --- Endpoint: Momentum screener (CMC trending × Binance 1h/2h/4h) ---
+# --- Endpoint: Momentum screener (MEXC+HL universe × Binance 1h/2h/4h) ---
 MOMENTUM_FILE = Path(__file__).resolve().parent / "momentum_ranking.json"
 
 
@@ -1399,7 +1399,7 @@ async def momentum_page(request: Request):
     if not MOMENTUM_FILE.exists():
         return (f"<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>"
                 f"<title>SCREENER &middot; Momentum</title>{DATA_PAGE_CSS}</head>"
-                f"<body><div class='wrap'>{neon_logo('Momentum — CMC Trending × Binance')}"
+                f"<body><div class='wrap'>{neon_logo('Momentum — MEXC+HL Universe × Binance')}"
                 f'<a href="{home}" class="btn">&#8962; Home</a>'
                 f'<h2>No momentum data yet</h2>'
                 f'<p class="meta">Run <code>python3 build_momentum.py</code> to generate it.</p>'
@@ -1441,9 +1441,9 @@ async def momentum_page(request: Request):
         chart = tradingview_link(r["coin"]) if mkt != "none" else "&middot;"
         rows_html.append(
             f"<tr style='background:{bg}'>"
-            f"<td>{r.get('cmc_rank','')}</td>"
             f"<td>{coin_link(r['coin'], token)}</td>"
             f"<td>{chart}</td>"
+            f"{_roc_cell(r.get('change24'))}"
             f"{score_cell}"
             f"<td data-order='{sum(v for v in (r.get('recent') or {}).values() if v is not None):.3f}'>{_recent_dots(r.get('recent'))}</td>"
             f"{_buy_cell(r.get('buy_ratio'))}"
@@ -1464,10 +1464,10 @@ async def momentum_page(request: Request):
 <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
 {DATA_PAGE_CSS}
 </head><body><div class="wrap">
-{neon_logo("Momentum — CMC Trending × Binance 1h/2h/4h")}
+{neon_logo("Momentum — MEXC+HL Universe × Binance 1h/2h/4h")}
 {nav_bar(request, token)}
 {auth_status_html(request)}
-<h2>Momentum — trending coins in a real uptrend</h2>
+<h2>Momentum — strongest coins in a real uptrend</h2>
 {_regime_banner(data.get("regime"))}
 <div class="searchbar">
   <span class="sicon">&#128269;</span>
@@ -1476,12 +1476,12 @@ async def momentum_page(request: Request):
   <button id="clearbtn" class="sbtn clear" type="button">Clear</button>
 </div>
 <table id="rank" class="display" style="width:100%">
-<thead><tr><th>CMC#</th><th>Coin</th><th>Chart</th><th>Score</th><th>Recent<br>5·15·30·45m</th><th>Buy%</th><th>RVOL</th><th>Early</th><th>1h&nbsp;%</th><th>2h&nbsp;%</th><th>4h&nbsp;%</th>
+<thead><tr><th>Coin</th><th>Chart</th><th>24h&nbsp;%</th><th>Score</th><th>Recent<br>5·15·30·45m</th><th>Buy%</th><th>RVOL</th><th>Early</th><th>1h&nbsp;%</th><th>2h&nbsp;%</th><th>4h&nbsp;%</th>
 <th>Ext&nbsp;%</th><th>4h&nbsp;Trend</th><th>Mkt</th><th>Exchanges</th><th>Momentum</th></tr></thead>
 <tbody>
 {''.join(rows_html)}
 </tbody></table>
-<p class="meta">CoinMarketCap's {data.get('total')} trending coins, scored on Binance
+<p class="meta">Top {data.get('total')} perps from the MEXC+HL universe, scored on Binance
 <b>1h/2h/4h</b> candles (weights {w.get('1h')}/{w.get('2h')}/{w.get('4h')}, strong on 1h)
 plus a small recent bucket ({w.get('recent')}) and a 5–15m acceleration term.
 <span class="chip good">UPTREND</span> = composite score &ge; {cfg.get('min_score')}, 1h rising,
@@ -1489,7 +1489,7 @@ NOT overextended (1h &le; {cfg.get('max_extension_pct')}% above its EMA{cfg.get(
 no single-bar spike (&le; {cfg.get('max_single_bar_pct')}%), 4h trend confirms, and
 no recent 15m dump (&gt; {cfg.get('max_recent_drop_pct')}%) — i.e.
 a genuine climb, <b>not a post-pump</b> top. <b>{data.get('count_momentum')}</b> qualify now &mdash;
-only these confirmed UPTRENDs are listed (rejected trending coins, incl. post-pump faders, are scored but hidden).
+only these confirmed UPTRENDs are listed (others are scored but hidden).
 Ext% = how far 1h price sits above its mean (high = stretched).
 Exchanges = listed on <span class="exch b">B</span>inance / <span class="exch m">M</span>EXC /
 <span class="exch hl">HL</span> Hyperliquid.
@@ -1501,7 +1501,7 @@ flags confluence — <span class="sig">BUY</span><span class="sig">VOL</span> de
 <span class="sig">ACC</span> accelerating, <span class="sig">BRK</span> new-high breakout,
 <span class="sig">OI&#9650;</span> open-interest rising, <span class="sig">F</span> funding not crowded;
 <span class="chip good">EARLY</span> = {cfg.get('early_min_signals')}+ fired (hover each for the value).<br>
-Source {data.get('source')} · generated {gen} UTC · <b id="dataage">{age_txt}</b> min old
+Generated {gen} UTC · <b id="dataage">{age_txt}</b> min old
 <span class="muted">(auto-refreshes every 5 min)</span>.</p>
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
