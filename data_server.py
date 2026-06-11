@@ -1,5 +1,5 @@
 """
-FastAPI server to broadcast access to Binance futures data files and provide a summary endpoint.
+SCREENER — FastAPI server for momentum, shorts, and exchange rankings.
 
 Authentication (any one of these grants access):
   * Session cookie  — obtained via the /login page (username + password).
@@ -15,24 +15,19 @@ import hashlib
 import secrets
 import binascii
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, Response, RedirectResponse, HTMLResponse
+from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 from typing import List, Dict, Optional, Tuple
-import pandas as pd
 from pathlib import Path
 from datetime import datetime, timezone
 from urllib.parse import quote_plus
 from dotenv import load_dotenv
 
-# --- Configuration: locations come from env vars / a local .env (no hardcoded host paths). ---
 HERE = Path(__file__).resolve().parent
-# A local .env in this folder can set SCREENER_* locations and/or the token.
 load_dotenv(HERE / ".env")
 PROJECT_ROOT = Path(os.environ.get("SCREENER_PROJECT_ROOT", str(HERE)))
-DATA_DIR = Path(os.environ.get("SCREENER_DATA_DIR", str(PROJECT_ROOT / "data" / "futures")))
 ENV_FILE = Path(os.environ.get("SCREENER_ENV_FILE", str(HERE / ".env")))
-# Token may come from the local .env above or from a configured project .env.
 load_dotenv(ENV_FILE)
 
 # Access token is required; no insecure default. Set DATA_SERVER_TOKEN in .env.
@@ -74,9 +69,6 @@ if _ro:
     except (json.JSONDecodeError, ValueError):
         print("WARNING: SCREENER_READONLY_USERS is not valid JSON; ignoring.", file=sys.stderr)
 
-# Rough CSV-size estimate factor (CSV text is ~this many times the on-disk .feather size).
-CSV_SIZE_FACTOR = float(os.getenv("SCREENER_CSV_SIZE_FACTOR", "2.8"))
-
 # Secret used to sign the session cookie. Stable across restarts (derived from the token)
 # unless SCREENER_SECRET_KEY is set explicitly.
 SECRET_KEY = os.getenv("SCREENER_SECRET_KEY") or hashlib.sha256(
@@ -85,7 +77,7 @@ SECRET_KEY = os.getenv("SCREENER_SECRET_KEY") or hashlib.sha256(
 # Session lifetime in seconds (default 7 days).
 SESSION_MAX_AGE = int(os.getenv("SCREENER_SESSION_MAX_AGE", str(7 * 24 * 3600)))
 
-app = FastAPI(title="Binance Futures Data Server")
+app = FastAPI(title="SCREENER")
 
 # Signed, tamper-proof session cookie (used by the /login flow).
 app.add_middleware(
@@ -290,9 +282,8 @@ def with_token(path: str, token: str) -> str:
 
 
 def coin_link(coin: str, token: str) -> str:
-    """Coin name linking to its filtered summary on this server."""
-    asset_url = with_token(f"/summary?showmeasset={coin}", token)
-    return f'<a href="{asset_url}">{coin}</a>'
+    tv_url = f"https://www.tradingview.com/chart/?symbol=BINANCE:{coin}USDT.P"
+    return f'<a href="{tv_url}" target="_blank" rel="noopener">{coin}</a>'
 
 
 def tradingview_link(coin: str) -> str:
@@ -300,11 +291,6 @@ def tradingview_link(coin: str) -> str:
     tv_url = f"https://www.tradingview.com/chart/?symbol=BINANCE:{coin}USDT.P"
     return (f'<a href="{tv_url}" target="_blank" rel="noopener" class="tv" '
             f'title="View {coin} on TradingView">&#128200;</a>')
-
-
-def coin_links(coin: str, token: str) -> str:
-    """Coin name link plus an inline TradingView chart link (used where there's no Chart column)."""
-    return f'{coin_link(coin, token)} {tradingview_link(coin)}'
 
 
 def asset_icon(asset_type: Optional[str]) -> str:
@@ -319,43 +305,6 @@ def asset_icon(asset_type: Optional[str]) -> str:
         return ""
     icon, title = ent
     return f' <span class="aflag" title="{title}">{icon}</span>'
-
-# --- Helper: Parse filename ---
-def parse_filename(fname: str):
-    # Example: BTC_USDT_USDT-15m-futures.feather
-    parts = fname.split("-")
-    if len(parts) < 2:
-        return None
-    coin = parts[0].split("_")[0]
-    timeframe = parts[0].split("_")[-1].replace("USDT", "").replace("_", "")
-    tf = parts[1]
-    dtype = parts[2].replace(".feather", "") if len(parts) > 2 else "unknown"
-    return coin, tf, dtype
-
-# --- Helper: Get file time span + bar (row) count ---
-def get_time_span(fpath: Path):
-    # Try to find a suitable time column. Returns (start, end, nbars).
-    for col in ["timestamp", "date", "time"]:
-        try:
-            df = pd.read_feather(fpath, columns=[col])
-            if df.empty or col not in df:
-                continue
-            nbars = len(df)  # rows in this column == number of bars/records
-            # Try to convert to int if not already
-            try:
-                start = int(df[col].iloc[0])
-                end = int(df[col].iloc[-1])
-            except Exception:
-                # Try to parse as datetime string
-                try:
-                    start = int(pd.to_datetime(df[col].iloc[0]).timestamp() * 1000)
-                    end = int(pd.to_datetime(df[col].iloc[-1]).timestamp() * 1000)
-                except Exception:
-                    continue
-            return start, end, nbars
-        except Exception:
-            continue
-    return None, None, None
 
 # --- Login page (neon themed) ----------------------------------------------
 def render_login_page(next_url: str = "/", error: str = "") -> str:
@@ -504,17 +453,12 @@ async def landing(request: Request):
     if not is_authenticated(request):
         return login_redirect(request)
     token = link_token(request)
-    feather_files = [f for f in DATA_DIR.iterdir() if f.suffix == ".feather"]
-    n_files = len(feather_files)
-    coins = sorted({p[0] for p in (parse_filename(f.name) for f in feather_files) if p})
-    coin_options = "".join(f'<option value="{c}">{c}</option>' for c in coins)
     nav = [
-        ("Data Summary", "Full file table: coin, timeframe, type, date range, age. Click a filename to download.", with_token("/summary", token)),
         ("Full Binance Ranking", "Every Binance futures perpetual ranked, filtered by volume &amp; spread, with a volatility index. Green = tradeable.", with_token("/binance-ranking", token)),
         ("MEXC Ranking", "Every MEXC futures perpetual ranked the same way (public API, no key). Green = tradeable.", with_token("/mexc-ranking", token)),
-        ("Combined (MEXC + Binance)", "Trade-on-MEXC selection view with Binance backtest-data links side by side.", with_token("/combined", token)),
-        ("Raw JSON Summary", "Machine-readable summary of every data file.", with_token("/summary.json", token)),
-        ("\U0001F4D8 User Manual (download)", "How to download pairs and read the LONG &amp; SHORT recommendations. Markdown &mdash; updated over time.", with_token("/manual", token)),
+        ("Combined (MEXC + Binance)", "Trade-on-MEXC selection view with Binance cost comparison side by side.", with_token("/combined", token)),
+        ("Momentum", "Top momentum coins scored across MEXC+HL universe.", with_token("/momentum", token)),
+        ("Shorts", "Short-side opportunities and funding rates.", with_token("/shorts", token)),
     ]
     cards = "".join(
         f'<a class="card" href="{url}"><h3>{title}</h3><p>{desc}</p></a>'
@@ -525,29 +469,10 @@ async def landing(request: Request):
 <title>SCREENER &middot; Home</title>
 {DATA_PAGE_CSS}
 </head><body><div class="wrap">
-{neon_logo(f"{n_files} data files &middot; OHLCV, mark &amp; funding-rate")}
+{neon_logo("SCREENER &middot; Momentum &amp; Rankings")}
 {nav_bar(request, token)}
 {auth_status_html(request)}
 {cards}
-<div class="jump">
-  <strong>Jump to a single coin</strong><br>
-  <p style="color:#9aa3b6;font-size:14px;margin:6px 0 10px;">Pick an asset to view its files ({len(coins)} coins on file).</p>
-  <select id="coin" onchange="go()">
-    <option value="" disabled selected>Select a coin…</option>
-    {coin_options}
-  </select>
-  <button onclick="go()">Show coin</button>
-</div>
-<script>
-const TOKEN = {token!r};
-function go(){{
-  const c = document.getElementById('coin').value.trim();
-  if(!c) return;
-  let url = '/summary?showmeasset=' + encodeURIComponent(c);
-  if (TOKEN) url += '&token=' + encodeURIComponent(TOKEN);
-  location.href = url;
-}}
-</script>
 </div></body></html>"""
     return html
 
@@ -750,21 +675,6 @@ td.down{color:#ff7a93;}
 </style>
 """
 
-# Colour + one-word gloss per freqtrade candle type.
-TYPE_INFO = {
-    "futures": ("var(--neon)", "#0ff"),
-    "mark": ("var(--neon2)", "#f0f"),
-    "funding_rate": ("var(--rate)", "#ffb300"),
-    "rate": ("var(--rate)", "#ffb300"),
-}
-
-
-def type_badge(dtype: str) -> str:
-    _, hexc = TYPE_INFO.get(dtype, ("#8a93a8", "#8a93a8"))
-    return (f'<span class="badge" style="color:{hexc};border-color:{hexc};'
-            f'box-shadow:0 0 8px {hexc}55">{dtype}</span>')
-
-
 def neon_logo(subtitle: str) -> str:
     return (f'<h1 class="logo"><span class="bolt">&#9889;</span> SCREENER</h1>'
             f'<p class="subt">{subtitle}</p>')
@@ -774,13 +684,11 @@ def neon_logo(subtitle: str) -> str:
 # The TEXT (label + tooltip lines) is editable without code via nav_tips.txt — see
 # load_nav_tips(). These defaults are the fallback when that file is missing/incomplete.
 NAV_ITEMS = [
-    ("/", "Home", ("Dashboard home", "Server, bot & data status", "Jump to any section")),
-    ("/summary", "Data Summary", ("Per-pair market screener", "Volume · spread · volatility filters", "The raw data table")),
-    ("/combined", "Combined", ("Select on MEXC, backtest on Binance", "Cross-exchange shortlist", "Spread & fee aware")),
+    ("/", "Home", ("Dashboard home", "Rankings & momentum overview", "Jump to any section")),
+    ("/combined", "Combined", ("Select on MEXC, compare Binance cost", "Cross-exchange shortlist", "Spread & fee aware")),
     ("/momentum", "Long", ("MEXC+HL universe × Binance 1h/2h/4h", "Coins in a real uptrend, not post-pump", "Early-detection leading signals")),
     ("/shorts", "Shorts", ("Weak, liquid perps to short", "Downtrend score + reversal-risk flags", "Funding / OI aware")),
     ("/results", "Results", ("Track record — were the calls right?", "Entry vs price · open + settled", "Equity curves & per-pick P&L")),
-    ("/summary.json", "Raw JSON", ("The summary data as JSON", "For scripts & API access", "Token-authenticated endpoint")),
 ]
 NAV_TIPS_FILE = Path(os.environ.get("SCREENER_NAV_TIPS", str(Path(__file__).resolve().parent / "nav_tips.txt")))
 
@@ -839,221 +747,6 @@ def nav_bar(request: Request, token: str) -> str:
     return f'<nav class="topnav">{"".join(parts)}</nav>'
 
 
-def human_size(n: Optional[int]) -> str:
-    """Human-readable byte size, e.g. 2.4 MB."""
-    if n is None:
-        return ''
-    size = float(n)
-    for unit in ("B", "KB", "MB", "GB"):
-        if size < 1024 or unit == "GB":
-            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
-        size /= 1024
-    return f"{size:.1f} GB"
-
-
-# Legend explaining the three data types served for each coin.
-DATA_TYPE_LEGEND = (
-    '<div class="legend"><h3>Data types — what each row means</h3><ul>'
-    f'<li>{type_badge("futures")} &nbsp;<b>Futures (last price) OHLCV.</b> '
-    'Open/high/low/close &amp; volume built from the perpetual contract’s actual '
-    '<i>traded</i> price. This is the standard price series for charting and backtesting.</li>'
-    f'<li>{type_badge("mark")} &nbsp;<b>Mark-price OHLCV.</b> '
-    'The exchange’s <i>fair</i> price (an index-based, smoothed value) used to compute '
-    'liquidations and unrealised PnL — not the last trade. It avoids wicks from thin '
-    'order books, so it can differ slightly from the futures price.</li>'
-    f'<li>{type_badge("rate")} &nbsp;<b>Funding rate.</b> '
-    'The periodic payment (typically every 8h) exchanged between longs and shorts that '
-    'tethers the perpetual to spot. <b>Positive</b> = longs pay shorts (market leans long); '
-    '<b>negative</b> = shorts pay longs. Stored as a rate series, not OHLCV.</li>'
-    '</ul></div>'
-)
-
-
-@app.get("/summary", response_class=HTMLResponse)
-async def summary(request: Request):
-    if not is_authenticated(request):
-        return login_redirect(request)
-    token = link_token(request)
-    # Optional filter: ?showmeasset=bnb -> only show that coin (case-insensitive)
-    asset = request.query_params.get("showmeasset", "").strip().upper()
-    files = sorted([f for f in DATA_DIR.iterdir() if f.suffix == ".feather"])
-    summary: Dict[str, Dict[str, List[Dict]]] = {}
-    for f in files:
-        fname = f.name
-        parsed = parse_filename(fname)
-        if not parsed:
-            continue
-        coin, tf, dtype = parsed
-        if asset and coin != asset:
-            continue
-        start, end, nbars = get_time_span(f)
-        # Calculate year, months, days
-        if start and end:
-            dt_start = datetime.utcfromtimestamp(start/1000)
-            dt_end = datetime.utcfromtimestamp(end/1000)
-            year = dt_start.year
-            months = (dt_end.year - dt_start.year) * 12 + (dt_end.month - dt_start.month) + 1
-            days = (dt_end - dt_start).days + 1
-        else:
-            year = months = days = None
-        if coin not in summary:
-            summary[coin] = {}
-        if tf not in summary[coin]:
-            summary[coin][tf] = []
-        summary[coin][tf].append({
-            "file": fname,
-            "type": dtype,
-            "start": start,
-            "end": end,
-            "year": year,
-            "months": months,
-            "days": days,
-            "bars": nbars
-        })
-    # Build HTML table (neon themed — matches the /login logo)
-    subtitle = ("Binance Futures Data &middot; " + asset) if asset else "Binance Futures Data"
-    html = [
-        "<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'>",
-        "<meta name='viewport' content='width=device-width, initial-scale=1'>",
-        "<title>SCREENER &middot; Data Summary</title>",
-        '<link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">',
-        DATA_PAGE_CSS,
-        "</head><body><div class='wrap'>",
-        neon_logo(subtitle),
-        nav_bar(request, token),
-        ('<a href="' + with_token('/summary', token) + '" class="btn">&#8617; Show All Coins</a>') if asset else '',
-        auth_status_html(request),
-        f"<h2>Data Summary{(' &mdash; ' + asset) if asset else ''}</h2>",
-        ('<div class="searchbar">'
-         '<span class="sicon">&#128269;</span>'
-         '<input id="tsearch" type="search" placeholder="Search coin, timeframe, type, file…" autocomplete="off">'
-         '<button id="tsearchbtn" class="sbtn" type="button">Search</button>'
-         '<button id="tclearbtn" class="sbtn clear" type="button">Clear</button>'
-         '</div>'),
-        '<table id="summary" class="display" style="width:100%">',
-        ("<thead><tr><th>Coin</th><th>TF</th><th>Type</th>"
-         "<th title='Number of rows/candles in the file'>Bars</th><th>Date Range</th><th>Filename</th>"
-         "<th title='On-disk .feather size'>Size</th>"
-         f"<th title='Rough estimate (~{CSV_SIZE_FACTOR:g}x the .feather size); exact size is computed only on download'>CSV ~</th>"
-         "<th>Age</th></tr></thead><tbody>")
-    ]
-    ro = is_readonly(request)
-    now = datetime.utcnow().timestamp()
-    for coin in sorted(summary.keys()):
-        for tf in sorted(summary[coin].keys()):
-            for entry in sorted(summary[coin][tf], key=lambda x: (x["type"], x["file"])):
-                file_url = with_token(f"/file/{entry['file']}", token)
-                csv_url = with_token(f"/csv/{entry['file']}", token)
-                # Get file age (days) and on-disk size from a single stat() call
-                fpath = DATA_DIR / entry['file']
-                try:
-                    st = fpath.stat()
-                    age_days = int((now - st.st_mtime) // 86400)
-                    size_bytes = st.st_size
-                except Exception:
-                    age_days = ''
-                    size_bytes = None
-                # Format date range
-                def fmt(ts):
-                    if ts is None:
-                        return ''
-                    try:
-                        return datetime.utcfromtimestamp(ts/1000).strftime('%Y-%b-%d')
-                    except Exception:
-                        return str(ts)
-                date_range = f"{fmt(entry['start'])} → {fmt(entry['end'])}" if entry['start'] and entry['end'] else ''
-                bars = entry['bars']
-                bars_cell = (f"<td data-order='{bars}'>{bars:,}</td>"
-                             if bars is not None else "<td data-order='-1'></td>")
-                # Read-only accounts see the filename but no download links.
-                if ro:
-                    file_cell = (f"<td>{entry['file']} "
-                                 f"<span class='muted' title='Read-only account — downloads disabled'>&#128274;</span></td>")
-                else:
-                    file_cell = (f"<td><a href='{file_url}'>{entry['file']}</a> "
-                                 f"&nbsp;|&nbsp; <a href='{csv_url}'>CSV</a></td>")
-                # Estimated CSV download size (rough; exact size only known on conversion).
-                csv_est = int(size_bytes * CSV_SIZE_FACTOR) if size_bytes is not None else None
-                csv_cell = (f"<td data-order='{csv_est}'>~{human_size(csv_est)}</td>"
-                            if csv_est is not None else "<td data-order='-1'></td>")
-                html.append(
-                    f"<tr>"
-                    f"<td>{coin_links(coin, token)}</td>"
-                    f"<td>{tf}</td>"
-                    f"<td>{type_badge(entry['type'])}</td>"
-                    f"{bars_cell}"
-                    f"<td>{date_range}</td>"
-                    f"{file_cell}"
-                    f"<td data-order='{size_bytes if size_bytes is not None else -1}'>{human_size(size_bytes)}</td>"
-                    f"{csv_cell}"
-                    f"<td>{age_days} days old</td>"
-                    f"</tr>"
-                )
-    html.append("</tbody></table>")
-    html.append(DATA_TYPE_LEGEND)     # row-type legend now sits below the table
-    # DataTables JS + custom neon search (matches the ranking page)
-    html.append('''
-<script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
-<script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
-<script>
-$(document).ready(function() {
-    var dt=$('#summary').DataTable({"pageLength":100,"dom":"lrtip"});
-    var box=document.getElementById('tsearch');
-    function doSearch(){ dt.search(box.value).draw(); }
-    box.addEventListener('input', doSearch);
-    box.addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.preventDefault(); doSearch(); } });
-    document.getElementById('tsearchbtn').addEventListener('click', doSearch);
-    document.getElementById('tclearbtn').addEventListener('click', function(){ box.value=''; doSearch(); box.focus(); });
-});
-</script>
-''')
-    html.append("</div></body></html>")
-    return "\n".join(html)
-@app.get("/summary.json")
-async def summary_json(request: Request):
-    require_api_auth(request)
-    # Optional filter: ?showmeasset=bnb -> only show that coin (case-insensitive)
-    asset = request.query_params.get("showmeasset", "").strip().upper()
-    files = sorted([f for f in DATA_DIR.iterdir() if f.suffix == ".feather"])
-    summary: Dict[str, Dict[str, List[Dict]]] = {}
-    for f in files:
-        fname = f.name
-        parsed = parse_filename(fname)
-        if not parsed:
-            continue
-        coin, tf, dtype = parsed
-        if asset and coin != asset:
-            continue
-        start, end, nbars = get_time_span(f)
-        # Calculate year, months, days
-        if start and end:
-            dt_start = datetime.utcfromtimestamp(start/1000)
-            dt_end = datetime.utcfromtimestamp(end/1000)
-            year = dt_start.year
-            months = (dt_end.year - dt_start.year) * 12 + (dt_end.month - dt_start.month) + 1
-            days = (dt_end - dt_start).days + 1
-        else:
-            year = months = days = None
-        if coin not in summary:
-            summary[coin] = {}
-        if tf not in summary[coin]:
-            summary[coin][tf] = []
-        summary[coin][tf].append({
-            "file": fname,
-            "type": dtype,
-            "start": start,
-            "end": end,
-            "year": year,
-            "months": months,
-            "days": days,
-            "bars": nbars
-        })
-    # Sort coins, then timeframes
-    sorted_summary = {k: dict(sorted(v.items())) for k, v in sorted(summary.items())}
-    return JSONResponse(content=sorted_summary)
-
-
-# --- Endpoint: Download file ---
 BINANCE_RANKING_FILE = Path(__file__).resolve().parent / "binance_ranking.json"
 
 
@@ -1927,21 +1620,10 @@ async def combined(request: Request):
     mexc = json.loads(MEXC_RANKING_FILE.read_text())
     binance = json.loads(BINANCE_RANKING_FILE.read_text()) if BINANCE_RANKING_FILE.exists() else {"rows": []}
     b_by_coin = {r["coin"]: r for r in binance.get("rows", [])}
-    # Coins that have Binance backtest data on disk (feather files).
-    bdata_coins = set()
-    try:
-        for f in DATA_DIR.iterdir():
-            if f.suffix == ".feather":
-                p = parse_filename(f.name)
-                if p:
-                    bdata_coins.add(p[0])
-    except FileNotFoundError:
-        pass
     rows_html = []
     for r in mexc.get("rows", []):          # already sorted by MEXC cost
         coin = r["coin"]
         good = r["good"]
-        bg = "rgba(63,224,138,.08)" if good else "rgba(255,90,110,.05)"
         flag = ('<span class="chip good">FILTER PASS</span>' if good else '<span class="chip bad">FILTER FAIL</span>')
         vol = r.get("volatility_pct")
         vol_cell = f"<td data-order='{vol if vol is not None else -1}'>{vol:.2f}</td>" if vol is not None else "<td data-order='-1'>-</td>"
@@ -1949,12 +1631,6 @@ async def combined(request: Request):
         b = b_by_coin.get(coin)
         b_cost = f"{b['total_cost_pct']:.4f}" if b else "—"
         b_cost_order = b["total_cost_pct"] if b else 9999
-        if coin in bdata_coins:
-            bt = f'<a class="btn dl" href="{with_token(f"/summary?showmeasset={coin}", token)}">CSV &#8595;</a>'
-            bt_order = 1
-        else:
-            bt = '<span class="no">&mdash;</span>'
-            bt_order = 0
         rows_html.append(
             f"<tr>"
             f"<td>{r['rank']}</td>"
@@ -1965,8 +1641,7 @@ async def combined(request: Request):
             f"<td data-order='{qv:.0f}'>{qv/1e6:,.2f}M</td>"
             f"<td>{r['total_cost_pct']:.4f}</td>"
             f"<td data-order='{b_cost_order}'>{b_cost}</td>"
-            f"<td data-order='{1 if good else 0}'>{flag}</td>"
-            f"<td data-order='{bt_order}'>{bt}</td></tr>"
+            f"<td data-order='{1 if good else 0}'>{flag}</td></tr>"
         )
     mexc_fee = mexc.get("fees", {}).get("roundtrip_taker_pct")
     html = f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
@@ -1975,10 +1650,10 @@ async def combined(request: Request):
 <link rel="stylesheet" href="https://cdn.datatables.net/1.13.6/css/jquery.dataTables.min.css">
 {DATA_PAGE_CSS}
 </head><body><div class="wrap">
-{neon_logo("Combined — trade on MEXC, backtest on Binance")}
+{neon_logo("Combined — MEXC &amp; Binance cost comparison")}
 {nav_bar(request, token)}
 {auth_status_html(request)}
-<h2>Combined ranking — MEXC selection &middot; Binance backtest data</h2>
+<h2>Combined ranking — MEXC &amp; Binance cost comparison</h2>
 <div class="searchbar">
   <span class="sicon">&#128269;</span>
   <input id="ranksearch" type="search" placeholder="Search coin, rank or value…" autocomplete="off" autofocus>
@@ -1987,14 +1662,13 @@ async def combined(request: Request):
 </div>
 <table id="rank" class="display" style="width:100%">
 <thead><tr><th>Rank</th><th>Coin</th><th>Chart</th><th>MEXC Spread %</th><th>MEXC Vol %</th>
-<th>MEXC 24h Vol</th><th>MEXC Cost %</th><th>Binance Cost %</th><th>MEXC Filter</th><th>Backtest</th></tr></thead>
+<th>MEXC 24h Vol</th><th>MEXC Cost %</th><th>Binance Cost %</th><th>MEXC Filter</th></tr></thead>
 <tbody>
 {''.join(rows_html)}
 </tbody></table>
 <p class="meta">Ranked by <b>MEXC</b> round-trip cost (spread % + {mexc_fee}% fee) — the exchange you trade on.
 <span class="chip good">FILTER PASS</span> reflects MEXC volume/spread/volatility thresholds.
-The <b>Binance Cost %</b> column and the <b>Backtest</b> CSV link are for historical data only
-(downloads come from the bundled Binance feather files).<br>
+The <b>Binance Cost %</b> column is for cross-exchange cost comparison only.<br>
 {mexc.get('total_symbols')} MEXC symbols &middot; {mexc.get('count_good')} good &middot; generated {mexc.get('generated_utc')} UTC.</p>
 <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
 <script src="https://cdn.datatables.net/1.13.6/js/jquery.dataTables.min.js"></script>
@@ -2010,52 +1684,6 @@ The <b>Binance Cost %</b> column and the <b>Backtest</b> CSV link are for histor
 }});</script>
 </div></body></html>"""
     return html
-
-
-@app.get("/file/{filename}")
-async def get_file(filename: str, request: Request):
-    require_full_access(request)
-    fpath = DATA_DIR / filename
-    if not fpath.exists() or not fpath.is_file():
-        raise HTTPException(status_code=404, detail="File not found.")
-    return FileResponse(str(fpath), filename=filename)
-
-
-# --- Endpoint: Download a data file converted to CSV on the fly ---
-@app.get("/csv/{filename}")
-async def get_csv(filename: str, request: Request):
-    require_full_access(request)
-    fpath = DATA_DIR / filename
-    if not fpath.exists() or not fpath.is_file() or fpath.suffix != ".feather":
-        raise HTTPException(status_code=404, detail="Feather file not found.")
-    try:
-        df = pd.read_feather(fpath)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Could not read feather file: {e}")
-    csv_data = df.to_csv(index=False)
-    out_name = fpath.stem + ".csv"
-    return Response(
-        content=csv_data,
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{out_name}"'},
-    )
-
-
-# --- Endpoint: Download the user manual (Markdown) ---
-USER_MANUAL_FILE = Path(os.environ.get("SCREENER_USER_MANUAL", str(HERE / "USER_MANUAL.md")))
-
-
-@app.get("/manual")
-async def get_manual(request: Request):
-    if not is_authenticated(request):
-        return login_redirect(request)
-    if not USER_MANUAL_FILE.exists() or not USER_MANUAL_FILE.is_file():
-        raise HTTPException(status_code=404, detail="User manual not found.")
-    return FileResponse(
-        str(USER_MANUAL_FILE),
-        media_type="text/markdown",
-        filename="SCREENER_User_Manual.md",
-    )
 
 
 if __name__ == "__main__":

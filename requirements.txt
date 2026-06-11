@@ -1,7 +1,5 @@
 fastapi
 uvicorn
-pandas
-pyarrow
 python-dotenv
 requests
 itsdangerous
