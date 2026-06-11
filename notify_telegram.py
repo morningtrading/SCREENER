@@ -58,15 +58,54 @@ def _load(path: Path) -> dict:
         return {}
 
 
+def _eval_cfg() -> dict:
+    """The eval/exit policy from config.json (stop/take levels + horizon), so the alert's
+    SL/TP suggestion matches exactly how the track record is scored. Empty dict if unreadable."""
+    cfg_path = Path(os.environ.get("SCREENER_CONFIG", str(BASE / "config.json")))
+    try:
+        return json.loads(cfg_path.read_text()).get("eval", {})
+    except Exception:
+        return {}
+
+
+def _side_pct(cfg: dict, key: str, side: str):
+    """A per-side % level (stop_loss_pct / take_profit_pct), accepting a bare number (both
+    sides) or a {"long":.., "short":..} mapping, mirroring build_eval. None if unset."""
+    v = cfg.get(key)
+    return v.get(side) if isinstance(v, dict) else v
+
+
+def _fmt_price(p) -> str:
+    """Adaptive price formatting (~4 significant figures, no sci-notation) across the huge
+    range of perp prices, from sub-cent meme coins to four-figure majors."""
+    if not isinstance(p, (int, float)) or p <= 0:
+        return "?"
+    if p >= 1000:
+        return f"{p:,.1f}"
+    if p >= 1:
+        return f"{p:.4g}"
+    import math
+    decimals = min(max(3 - math.floor(math.log10(p)), 2), 10)
+    return f"{p:.{decimals}f}"
+
+
+def _level_price(entry, side: str, pct):
+    """Price that yields `pct` % P&L for `side` (the inverse of build_eval.pnl_of), or None
+    if pct is None. long: entry*(1+pct/100); short: entry/(1+pct/100)."""
+    if pct is None or not isinstance(entry, (int, float)) or entry <= 0:
+        return None
+    return entry * (1 + pct / 100.0) if side == "long" else entry / (1 + pct / 100.0)
+
+
 def _qualifiers(data: dict, flag: str, score_key: str, min_score: float) -> dict:
-    """Return {coin: score} for rows that are on the board and over threshold."""
+    """Return {coin: {"score":.., "price":..}} for rows on the board and over threshold."""
     out = {}
     for r in data.get("rows", []):
         score = r.get(score_key)
         if r.get(flag) and isinstance(score, (int, float)) and score > min_score:
             coin = r.get("coin")
             if coin:
-                out[coin] = round(float(score), 2)
+                out[coin] = {"score": round(float(score), 2), "price": r.get("price")}
     return out
 
 
@@ -108,13 +147,36 @@ def _toobit_url(coin: str) -> str:
     return f"https://www.toobit.com/en-US/futures/{coin}-SWAP-USDT"
 
 
-def _fmt(side: str, emoji: str, entries: dict, path: str, min_score: float) -> str:
+def _fmt(label: str, side: str, emoji: str, entries: dict, path: str,
+         min_score: float, ecfg: dict) -> str:
+    """One alert block for a side. Each line carries the entry price plus suggested SL/TP
+    levels derived from the eval exit policy, so the alert matches the scored track record.
+    A side with no configured TP (shorts ride to the horizon) shows the horizon instead."""
     link = f"https://{HOST}{path}" if HOST else None
-    head = f"{emoji} <b>New {side}</b> (score &gt; {min_score:g})"
+    sl_pct = _side_pct(ecfg, "stop_loss_pct", side)
+    tp_pct = _side_pct(ecfg, "take_profit_pct", side)
+    horizon = ecfg.get("horizon_hours")
+    # policy summary in the header
+    sl_txt = f"SL {sl_pct:g}%" if sl_pct is not None else "SL —"
+    tp_txt = (f"TP +{tp_pct:g}%" if tp_pct is not None
+              else (f"TP ride {horizon:g}h" if horizon else "TP open"))
+    head = f"{emoji} <b>New {label}</b> (score &gt; {min_score:g}) · {sl_txt} / {tp_txt}"
     if link:
         head = f'{head} — <a href="{link}">open</a>'
-    lines = [f'• <a href="{_toobit_url(coin)}">{coin}</a> — {score:.2f}'
-             for coin, score in sorted(entries.items(), key=lambda kv: -kv[1])]
+
+    lines = []
+    for coin, info in sorted(entries.items(), key=lambda kv: -kv[1]["score"]):
+        price = info.get("price")
+        bits = [f'• <a href="{_toobit_url(coin)}">{coin}</a> <b>{info["score"]:.2f}</b>']
+        if isinstance(price, (int, float)) and price > 0:
+            bits.append(f"entry {_fmt_price(price)}")
+            sl = _level_price(price, side, sl_pct)
+            tp = _level_price(price, side, tp_pct)
+            if sl is not None:
+                bits.append(f"SL {_fmt_price(sl)}")
+            bits.append(f"TP {_fmt_price(tp)}" if tp is not None
+                        else (f"TP {horizon:g}h" if horizon else "TP open"))
+        lines.append("  ·  ".join(bits))
     return head + "\n" + "\n".join(lines)
 
 
@@ -137,11 +199,12 @@ def main() -> None:
     new_short = {c: s for c, s in shorts.items() if c not in prev_short}
 
     if not first_run and (new_long or new_short):
+        ecfg = _eval_cfg()
         blocks = []
         if new_long:
-            blocks.append(_fmt("LONG", "🟢", new_long, "/momentum", LONG_MIN))
+            blocks.append(_fmt("LONG", "long", "🟢", new_long, "/momentum", LONG_MIN, ecfg))
         if new_short:
-            blocks.append(_fmt("SHORT", "🔴", new_short, "/shorts", SHORT_MIN))
+            blocks.append(_fmt("SHORT", "short", "🔴", new_short, "/shorts", SHORT_MIN, ecfg))
         if _send("\n\n".join(blocks)):
             print(f"[notify] sent: {len(new_long)} long, {len(new_short)} short")
     elif first_run:
