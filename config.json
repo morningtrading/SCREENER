@@ -92,6 +92,7 @@
     "capitulation_bar_pct": 6.0,
     "regime_coins": ["BTC", "ETH", "HYPE", "ZEC"],
     "picks_keep": 20000,
+    "rvol_floor": 0.5,
     "shadow_enabled": true,
     "shadow_weights": {"1h": 0.10, "2h": 0.15, "4h": 0.50, "recent": 0.08},
     "shadow_accel_weight": 0.80,

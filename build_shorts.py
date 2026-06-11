@@ -431,8 +431,15 @@ def score_short(base, data_src, cfg, recent, micro):
     rsi_val = rsi(kl_tf["1h"]["close"], cfg["rsi_period"]) if kl_tf.get("1h") else None
     rlevel, rreasons = reversal_risk(rsi_val, ext_1h, micro.get("funding"), recent, last_1h, cfg)
 
+    # P4: hard rvol floor — low-volume drift is noise (rvol<0.5 bucket: 40% WR, -0.44% avg).
+    # rvol_min remains the confirmation-reason threshold; rvol_floor is the hard reject.
+    rvol_floor = cfg.get("rvol_floor")
+    rvol_val = det.get("rvol")
+
     reason = ""
-    if score < cfg["min_score"]:
+    if rvol_floor is not None and rvol_val is not None and rvol_val < rvol_floor:
+        reason = f"rvol {rvol_val:.2f} < floor {rvol_floor}"
+    elif score < cfg["min_score"]:
         reason = f"score {score:.2f} < {cfg['min_score']}"
     elif roc_1h >= 0:
         reason = "1h not falling"
@@ -526,9 +533,46 @@ def main():
                 row.update(res)
         return row
 
+    def deep_score_and_log(c):
+        r = deep_score(c)
+        if not r.get("short"):
+            _log_rejected(r, datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+        return r
+
+    # P2: rejected-picks log — near-misses that selection bias would otherwise hide.
+    # A "near-miss" is any deep-scored candidate that almost qualified: score >= 70% of
+    # min_score (would qualify with a modest threshold shift), or rejected solely by
+    # reversal_risk / RSI floor / rvol floor (a single config change would include it).
+    # Logging them lets future backtests evaluate filter changes against the trades they
+    # would have ADDED, not just removed, breaking the selection-bias loop.
+    REJECTED_FILE = BASE / "shorts_history" / "rejected_picks.jsonl"
+    _rej_buf: list = []
+
+    def _log_rejected(r: dict, ts: str) -> None:
+        reason = r.get("reason", "")
+        score = r.get("short_score")
+        near_miss = (
+            (score is not None and score >= 0.7 * CFG["min_score"])
+            or reason.startswith("reversal risk")
+            or reason.startswith("rvol")
+            or "rsi" in reason.lower()
+            or "oversold" in reason.lower()
+        )
+        if near_miss and r.get("price"):
+            _rej_buf.append(json.dumps({
+                "ts": ts, "coin": r["coin"], "data_src": r.get("data_src"),
+                "entry_price": r["price"], "short_score": score,
+                "rejection_reason": reason,
+                "reversal_risk": r.get("reversal_risk"), "rsi": r.get("rsi"),
+                "rvol": r.get("rvol"), "buy_ratio": r.get("buy_ratio"),
+                "oi_change": r.get("oi_change"), "change24_at_call": round(r.get("change24", 0), 2),
+                "funding": r.get("funding"), "components": r.get("components"),
+                "roc": r.get("roc"),
+            }))
+
     # Fan the per-coin HTTP work out across threads; preserves pool order.
     with ThreadPoolExecutor(max_workers=max(1, SCAN_WORKERS)) as ex:
-        rows = list(ex.map(deep_score, pool))
+        rows = list(ex.map(deep_score_and_log, pool))
 
     # rank: confirmed SHORTs first, then by weakness score (unscored sink); keep store_top
     rows.sort(key=lambda r: (r["short"], r["short_score"] if r["short_score"] is not None else -1e9), reverse=True)
@@ -539,10 +583,20 @@ def main():
     # regime banner (reuse momentum's helper)
     spot = bm.spot_symbols()
     regime = {}
+    btc_roc_3h = None   # P6: logged into every pick for the dump-suppressor study
     for rc in CFG.get("regime_coins", ["BTC", "ETH", "HYPE", "ZEC"]):
         rcu = rc.upper()
         mkt = "futures" if rcu in perp else ("spot" if f"{rcu}USDT" in spot else None)
-        regime[rcu] = bm.regime_for(rcu, mkt, CFG)
+        rg = bm.regime_for(rcu, mkt, CFG)
+        regime[rcu] = rg
+        # P6: approximate 3h ROC from the two closest available windows (2h + 4h → interpolate,
+        # or use whichever single TF is closer to 3h). regime_for logs "2h" and "4h" ROC keys.
+        if rcu == "BTC" and rg:
+            r2 = rg.get("2h"); r4 = rg.get("4h")
+            if r2 is not None and r4 is not None:
+                btc_roc_3h = round((r2 + r4) / 2.0, 3)   # midpoint ≈ 3h ROC
+            elif r4 is not None:
+                btc_roc_3h = round(r4, 3)
 
     out = {
         "generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -573,6 +627,7 @@ def main():
         "rvol": r.get("rvol"), "buy_ratio": r.get("buy_ratio"),
         "oi_change": r.get("oi_change"), "breakdown": r.get("breakdown"),
         "roc": r.get("roc"),
+        "btc_roc_3h": btc_roc_3h,   # P6: market regime at entry for dump-suppressor study
     }) for r in rows if r.get("short") and r.get("price")]
     if new_lines:
         with open(picks_file, "a") as fh:
@@ -585,6 +640,21 @@ def main():
         except OSError:
             pass
 
+    # P2: flush rejected near-misses
+    if _rej_buf:
+        REJECTED_FILE.parent.mkdir(exist_ok=True)
+        with open(REJECTED_FILE, "a") as fh:
+            fh.write("\n".join(_rej_buf) + "\n")
+        keep = int(CFG.get("picks_keep", 20000))
+        try:
+            existing = REJECTED_FILE.read_text().splitlines()
+            if len(existing) > keep:
+                REJECTED_FILE.write_text("\n".join(existing[-keep:]) + "\n")
+        except OSError:
+            pass
+
+    # P6: BTC 3h ROC — already computed in regime loop above; log into picks file.
+    # (btc_roc_3h is set by the regime section below; if BTC wasn't in regime_coins it's None)
     top = [r["coin"] for r in rows if r["short"]][:10]
     print(f"Wrote {OUT_FILE}: scanned {len(bases)} perps ({len(excluded)} non-crypto CFDs excluded), "
           f"{len(rows)} listed, {out['count_short']} flagged SHORT, generated {out['generated_utc']}")
