@@ -389,6 +389,24 @@ def score_short(base, data_src, cfg, recent, micro):
     breakdown_contrib = cfg.get("early_weight", 0.0) * len(fired)
     score += breakdown_contrib
 
+    # Shadow score: 4h-weighted / accel-dominant formulation validated by the 2026-06-11
+    # track-record decomposition (short_score r=-0.13, accel r=+0.38, weakness_4h r=+0.31).
+    # Logged alongside short_score for forward-testing — zero effect on ranking or alerts.
+    # Phase 1 of the score-reweight plan; flip to live only after ≥7d of validation data.
+    shadow_score = None
+    shadow_weakness = shadow_accel_c = shadow_br_c = None
+    if cfg.get("shadow_enabled"):
+        sw = cfg.get("shadow_weights", {})
+        sw_keys = [k for k in bucket_w if sw.get(k, 0.0) > 0]
+        sw_sum = sum(sw[k] for k in sw_keys) or 1.0
+        shadow_weakness = sum(sw[k] * bucket_v[k] for k in sw_keys) / sw_sum
+        shadow_accel_c = cfg.get("shadow_accel_weight", 0.0) * accel
+        br = det.get("buy_ratio")
+        # low buy_ratio = sellers dominating = good for short; -(ratio-0.5) is positive when <0.5
+        shadow_br_c = (cfg.get("shadow_buy_ratio_weight", 0.0) * -(br - 0.5)
+                       if br is not None else 0.0)
+        shadow_score = round(shadow_weakness + shadow_accel_c + shadow_br_c + breakdown_contrib, 3)
+
     # Decomposition of the final short_score for the eval/track-record analysis: the three
     # additive parts (weakness + accel + breakdown ≈ short_score) plus the per-timeframe weakness
     # contributions. Logged per pick so a later study can correlate each component — not just the
@@ -401,6 +419,10 @@ def score_short(base, data_src, cfg, recent, micro):
         "weakness_tf": {k: round(bucket_v[k], 4) for k in bucket_v},
         "weights_tf": {k: round(bucket_w[k], 4) for k in bucket_w},
         "n_breakdown_signals": len(fired),
+        "shadow_score": shadow_score,
+        "shadow_weakness": round(shadow_weakness, 4) if shadow_weakness is not None else None,
+        "shadow_accel_contrib": round(shadow_accel_c, 4) if shadow_accel_c is not None else None,
+        "shadow_buy_ratio_contrib": round(shadow_br_c, 4) if shadow_br_c is not None else None,
     }
 
     ext_1h = per_tf["1h"]["extension"]
