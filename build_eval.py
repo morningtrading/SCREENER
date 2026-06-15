@@ -55,6 +55,11 @@ _EVAL_DEFAULTS = {
     # winners are horizon-held while flip exits net ~0%, so letting shorts run captures more of
     # the downtrend. Bool (both sides) or per-side {"long": .., "short": ..}.
     "exit_on_flip": True,
+    # Minimum time (minutes) a position must be held before a flip exit is allowed. Flip exits
+    # within the first N minutes are deferred to entry+N — trades held under 30 min flip out at
+    # 34% win rate vs 64-72% for 30m+, so even a deferred flip exit is better than an early one.
+    # Null / 0 = no minimum (current behaviour). Per-side dict also accepted.
+    "flip_min_hold_min": 0,
     # Take-profit level (% P&L). Fills intra-candle on the FAVORABLE wick (the high for a long,
     # the low for a short), the mirror of the stop. Longs spike fast then fade, so a TP banks the
     # move before flip/horizon hands it back. Null (no TP), a single number (both sides), or
@@ -99,6 +104,14 @@ def flip_exit_for(side):
     (both sides) or a per-side {"long": .., "short": ..} mapping in eval.exit_on_flip."""
     v = ECFG.get("exit_on_flip")
     return v.get(side, True) if isinstance(v, dict) else v
+
+
+def flip_min_hold_for(side):
+    """Minimum hold time (seconds) before a flip exit is allowed for `side`. Accepts a number
+    (both sides) or a per-side {"long": .., "short": ..} mapping in eval.flip_min_hold_min."""
+    v = ECFG.get("flip_min_hold_min") or 0
+    mins = v.get(side, 0) if isinstance(v, dict) else v
+    return (mins or 0) * 60.0
 
 
 def tp_for(side):
@@ -165,7 +178,7 @@ def split_episodes(picks, grace_s):
     return eps
 
 
-def episode_close(ep, now, horizon_h, grace_s, flip_exit=True):
+def episode_close(ep, now, horizon_h, grace_s, flip_exit=True, min_hold_s=0.0):
     """When (and why) one episode closes — (close_dt | None, reason).
 
     The episode is OPEN while the screener keeps re-flagging it. It closes at the EARLIER of:
@@ -173,6 +186,9 @@ def episode_close(ep, now, horizon_h, grace_s, flip_exit=True):
       - "horizon": `horizon_h` hours after the episode's entry.
     When `flip_exit` is False the flip path is disabled — the position is held to the horizon
     (or stop) regardless of whether the screener keeps re-flagging it.
+    When `min_hold_s` > 0, a flip exit cannot occur before entry + min_hold_s: if the last
+    re-flag falls inside the minimum hold window the flip close is deferred to entry+min_hold_s
+    (priced at that candle rather than the early-exit candle).
     close_dt None => still open ("open").
     """
     entry_dt = parse_ts(ep[0]["ts"])
@@ -180,7 +196,10 @@ def episode_close(ep, now, horizon_h, grace_s, flip_exit=True):
     horizon_close = entry_dt + timedelta(hours=horizon_h)
     cands = []
     if flip_exit and (now - ep_end).total_seconds() > grace_s:     # no longer being re-flagged
-        cands.append((ep_end, "flip"))
+        # Defer the flip close to entry+min_hold_s if the last flag fell inside that window.
+        flip_close = max(ep_end, entry_dt + timedelta(seconds=min_hold_s))
+        if now >= flip_close:
+            cands.append((flip_close, "flip"))
     if now >= horizon_close:
         cands.append((horizon_close, "horizon"))
     if not cands:
@@ -192,7 +211,7 @@ def pnl_of(entry, price, side):
     return (price / entry - 1.0) * 100.0 if side == "long" else (entry / price - 1.0) * 100.0
 
 
-def evaluate(path, side, now, horizon_h, grace_s):
+def evaluate(path, side, now, horizon_h, grace_s, min_hold_s=0.0):
     open_rows, settled_rows, series = [], [], {}
     now_ms = int(now.timestamp() * 1000)
     flip_exit = flip_exit_for(side)     # does this side close on momentum-flip, or ride to horizon?
@@ -220,7 +239,7 @@ def evaluate(path, side, now, horizon_h, grace_s):
             ohlc = [k for k in ohlc if k[0] <= now_ms]
             if not ohlc:
                 continue
-            close_dt, reason = episode_close(ep, now, horizon_h, grace_s, flip_exit)
+            close_dt, reason = episode_close(ep, now, horizon_h, grace_s, flip_exit, min_hold_s)
             close_ms = int(close_dt.timestamp() * 1000) if close_dt else None
             # Settled position: freeze the path (and the exit price) at the close time.
             kept = [k for k in ohlc if close_ms is None or k[0] <= close_ms] or ohlc[:1]
@@ -322,8 +341,8 @@ def main():
     out = {
         "generated_utc": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "horizon_hours": h,
-        "longs": evaluate(LONGS, "long", now, h, g),
-        "shorts": evaluate(SHORTS, "short", now, h, g),
+        "longs": evaluate(LONGS, "long", now, h, g, flip_min_hold_for("long")),
+        "shorts": evaluate(SHORTS, "short", now, h, g, flip_min_hold_for("short")),
     }
     OUT_FILE.write_text(json.dumps(out, indent=2))
     L, S = out["longs"], out["shorts"]

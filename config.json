@@ -55,6 +55,7 @@
   "eval": {
     "horizon_hours": 4.0,
     "flip_grace_min": 15,
+    "flip_min_hold_min": { "long": 30, "short": 0 },
     "stop_loss_pct": { "long": -2.0, "short": -8.0 },
     "reversal_risk_stop_pct": null,
     "exclude_reversal_risk": true,

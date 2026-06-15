@@ -46,7 +46,7 @@ def main():
     now = datetime.now(timezone.utc)
     h, g = be.ECFG["horizon_hours"], be.ECFG["flip_grace_min"] * 60.0
     path = be.LONGS if args.side == "long" else be.SHORTS
-    res = be.evaluate(path, args.side, now, h, g)
+    res = be.evaluate(path, args.side, now, h, g, be.flip_min_hold_for(args.side))
     if args.min_age_hours:
         res["rows"] = [r for r in res["rows"] if r["age_hours"] >= args.min_age_hours]
         res["count"] = len(res["rows"])
