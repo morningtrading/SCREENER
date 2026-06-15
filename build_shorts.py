@@ -102,6 +102,9 @@ _DEFAULTS = {
         "capitulation_bar_pct": 6.0,    # single 1h bar down > this = capitulation (bounce-prone)
         "regime_coins": ["BTC", "ETH", "HYPE", "ZEC"],
         "picks_keep": 20000,            # max lines kept in shorts_history/short_picks.jsonl
+        # Coins permanently excluded from the short universe regardless of score. Use when a coin
+        # has a persistent structural uptrend that makes shorting it reliably unprofitable.
+        "coin_blacklist": [],
     },
     # Shared liquidity thresholds (the same field the rankings / combined pages use). We reuse
     # max_spread_pct here so a candidate's MEXC bid/ask spread must be tight enough to short.
@@ -486,7 +489,8 @@ def main():
     perp = _cached_set("perp_bases", UNIVERSE_TTL, bm.futures_perp_bases)
     excluded = _cached_set("commodity_bases", UNIVERSE_TTL, commodity_bases)
 
-    bases = (set(mexc) | set(hl)) - excluded
+    blacklist = set(CFG.get("coin_blacklist", []))
+    bases = (set(mexc) | set(hl)) - excluded - blacklist
     cands = []
     for b in bases:
         m, h = mexc.get(b), hl.get(b)
