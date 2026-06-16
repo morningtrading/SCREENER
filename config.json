@@ -50,7 +50,8 @@
     "early_weight": 0.2,
 
     "regime_coins": ["BTC", "ETH", "HYPE", "ZEC"],
-    "picks_keep": 20000
+    "picks_keep": 20000,
+    "coin_blacklist": ["LIT", "TON", "CHIP", "PENGU"]
   },
   "eval": {
     "horizon_hours": 4.0,

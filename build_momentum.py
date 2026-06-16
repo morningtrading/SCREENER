@@ -79,6 +79,9 @@ _DEFAULTS = {
         "early_weight": 0.2,           # small score bonus per leading signal that fires
         "regime_coins": ["BTC", "ETH", "HYPE", "ZEC"],  # reference coins for the market-regime banner
         "picks_keep": 20000,           # max lines kept in momentum_history/momentum_picks.jsonl
+        # Coins permanently excluded from the long universe regardless of score. Use when a coin
+        # has a persistent pattern of false momentum signals (repeated losses, structural weakness).
+        "coin_blacklist": [],
     }
 }
 
@@ -496,8 +499,9 @@ def main():
                 if b not in uni or (t.get("vol24") or 0) > (uni[b].get("vol24") or 0):
                     uni[b] = t
         min_vol = CFG.get("broad_min_volume_usdt", 0) or 0
+        blacklist = set(CFG.get("coin_blacklist", []))
         extra = [b for b, t in uni.items()
-                 if b and (t.get("vol24") or 0) >= min_vol]
+                 if b and (t.get("vol24") or 0) >= min_vol and b not in blacklist]
         # strongest first (most up on the day); the deep score rejects post-pump blow-offs
         extra.sort(key=lambda b: uni[b].get("change24") or 0.0, reverse=True)
         for b in extra[: int(CFG.get("broad_scan_top", 60))]:
