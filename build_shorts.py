@@ -105,6 +105,12 @@ _DEFAULTS = {
         # Coins permanently excluded from the short universe regardless of score. Use when a coin
         # has a persistent structural uptrend that makes shorting it reliably unprofitable.
         "coin_blacklist": [],
+        # Market-regime gate: suppress new short picks when BTC is in a strong 2h uptrend.
+        # Backtested on 6 days of history: trades called during BTC 2h >+0.75% averaged -2.28%
+        # (vs -0.40% baseline), accounting for 73% of total short losses. Set regime_gate to
+        # true to enable; regime_gate_threshold_pct sets the BTC 2h ROC cutoff.
+        "regime_gate": False,
+        "regime_gate_threshold_pct": 0.75,
     },
     # Shared liquidity thresholds (the same field the rankings / combined pages use). We reuse
     # max_spread_pct here so a candidate's MEXC bid/ask spread must be tight enough to short.
@@ -588,6 +594,7 @@ def main():
     spot = bm.spot_symbols()
     regime = {}
     btc_roc_3h = None   # P6: logged into every pick for the dump-suppressor study
+    btc_2h_roc = None   # regime gate: BTC 2h ROC at the time of this run
     for rc in CFG.get("regime_coins", ["BTC", "ETH", "HYPE", "ZEC"]):
         rcu = rc.upper()
         mkt = "futures" if rcu in perp else ("spot" if f"{rcu}USDT" in spot else None)
@@ -597,16 +604,27 @@ def main():
         # or use whichever single TF is closer to 3h). regime_for logs "2h" and "4h" ROC keys.
         if rcu == "BTC" and rg:
             r2 = rg.get("2h"); r4 = rg.get("4h")
+            btc_2h_roc = r2   # used by the regime gate below
             if r2 is not None and r4 is not None:
                 btc_roc_3h = round((r2 + r4) / 2.0, 3)   # midpoint ≈ 3h ROC
             elif r4 is not None:
                 btc_roc_3h = round(r4, 3)
+
+    # Regime gate: suppress new short picks when BTC 2h ROC exceeds the threshold.
+    # The ranking JSON is still written (so the page shows scores), but no picks are logged
+    # to short_picks.jsonl — positions opened into a broad rally are systematically losers.
+    regime_gate_on = bool(CFG.get("regime_gate", False))
+    regime_gate_thresh = float(CFG.get("regime_gate_threshold_pct", 0.75))
+    regime_blocked = (regime_gate_on
+                      and btc_2h_roc is not None
+                      and btc_2h_roc > regime_gate_thresh)
 
     out = {
         "generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "config": CFG,
         "max_spread_pct": MAX_SPREAD_PCT,
         "regime": regime,
+        "regime_blocked": regime_blocked,
         "total": len(rows),
         "count_short": sum(1 for r in rows if r["short"]),
         "scanned": len(bases),
@@ -614,12 +632,16 @@ def main():
     }
     OUT_FILE.write_text(json.dumps(out, indent=2))
 
+    if regime_blocked:
+        print(f"[regime-gate] BTC 2h ROC={btc_2h_roc:+.2f}% > {regime_gate_thresh:+.2f}% threshold — "
+              f"suppressing {out['count_short']} short pick(s); ranking written, no picks logged.")
+
     # Snapshot the proposed shorts (flagged) with their entry price, so we can later
     # compare to the actual price and score whether the call was right (see eval_shorts.py).
     HIST_DIR = BASE / "shorts_history"
     HIST_DIR.mkdir(exist_ok=True)
     picks_file = HIST_DIR / "short_picks.jsonl"
-    new_lines = [json.dumps({
+    new_lines = [] if regime_blocked else [json.dumps({
         "ts": out["generated_utc"], "coin": r["coin"], "data_src": r["data_src"],
         "entry_price": r.get("price"), "short_score": r["short_score"],
         "reversal_risk": r["reversal_risk"], "change24_at_call": round(r["change24"], 2),
