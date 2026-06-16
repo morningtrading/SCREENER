@@ -105,6 +105,10 @@ _DEFAULTS = {
         # Coins permanently excluded from the short universe regardless of score. Use when a coin
         # has a persistent structural uptrend that makes shorting it reliably unprofitable.
         "coin_blacklist": [],
+        # Max average absolute 1h candle move (% close-to-close) over the klines_limit window.
+        # Low-cap coins with avg bars > this are too volatile for the short stop to hold — they
+        # blow through the stop before the screener can re-score. Null = disabled.
+        "max_avg_bar_pct": None,
         # Market-regime gate: suppress new short picks when BTC is in a strong 2h uptrend.
         # Backtested on 6 days of history: trades called during BTC 2h >+0.75% averaged -2.28%
         # (vs -0.40% baseline), accounting for 73% of total short losses. Set regime_gate to
@@ -445,8 +449,20 @@ def score_short(base, data_src, cfg, recent, micro):
     rvol_floor = cfg.get("rvol_floor")
     rvol_val = det.get("rvol")
 
+    # Volatility gate: avg absolute 1h bar > max_avg_bar_pct → too volatile to short
+    # reliably. Catches low-cap coins (VELVET, COAI-type) that make 5%+ candles and
+    # blow through the short stop before the screener can re-score them.
+    avg_bar_1h = None
+    max_ab = cfg.get("max_avg_bar_pct")
+    if max_ab is not None and kl_tf.get("1h"):
+        cl = kl_tf["1h"].get("close", [])
+        if len(cl) >= 2:
+            avg_bar_1h = sum(abs(cl[i] / cl[i-1] - 1) * 100 for i in range(1, len(cl))) / (len(cl) - 1)
+
     reason = ""
-    if rvol_floor is not None and rvol_val is not None and rvol_val < rvol_floor:
+    if max_ab is not None and avg_bar_1h is not None and avg_bar_1h > max_ab:
+        reason = f"volatile: avg 1h bar {avg_bar_1h:.1f}% > {max_ab}%"
+    elif rvol_floor is not None and rvol_val is not None and rvol_val < rvol_floor:
         reason = f"rvol {rvol_val:.2f} < floor {rvol_floor}"
     elif score < cfg["min_score"]:
         reason = f"score {score:.2f} < {cfg['min_score']}"
