@@ -51,7 +51,7 @@
 
     "regime_coins": ["BTC", "ETH", "HYPE", "ZEC"],
     "picks_keep": 20000,
-    "coin_blacklist": ["LIT", "TON", "CHIP", "PENGU"]
+    "coin_blacklist": ["LIT", "TON", "CHIP", "PENGU", "LAB", "ZEC", "JTO", "ALGO", "CRV"]
   },
   "eval": {
     "horizon_hours": 4.0,
@@ -94,7 +94,7 @@
     "capitulation_bar_pct": 6.0,
     "regime_coins": ["BTC", "ETH", "HYPE", "ZEC"],
     "picks_keep": 20000,
-    "coin_blacklist": ["XMR", "VELVET", "COAI"],
+    "coin_blacklist": ["XMR", "VELVET", "COAI", "STG", "APT"],
     "max_avg_bar_pct": 2.5,
     "regime_gate": true,
     "regime_gate_threshold_pct": 0.75,
