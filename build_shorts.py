@@ -109,12 +109,12 @@ _DEFAULTS = {
         # Low-cap coins with avg bars > this are too volatile for the short stop to hold — they
         # blow through the stop before the screener can re-score. Null = disabled.
         "max_avg_bar_pct": None,
-        # Market-regime gate: suppress new short picks when BTC is in a strong 2h uptrend.
-        # Backtested on 6 days of history: trades called during BTC 2h >+0.75% averaged -2.28%
-        # (vs -0.40% baseline), accounting for 73% of total short losses. Set regime_gate to
-        # true to enable; regime_gate_threshold_pct sets the BTC 2h ROC cutoff.
+        # Market-regime gate: suppress new short picks when BTC is in a strong 2h uptrend OR
+        # crashing hard. Uptrend (>threshold_pct) squeezes shorts. Hard dump (<floor_pct)
+        # triggers oversold alt bounces that stop-out positions before the thesis plays out.
         "regime_gate": False,
         "regime_gate_threshold_pct": 0.75,
+        "regime_gate_floor_pct": -1.5,
     },
     # Shared liquidity thresholds (the same field the rankings / combined pages use). We reuse
     # max_spread_pct here so a candidate's MEXC bid/ask spread must be tight enough to short.
@@ -631,9 +631,10 @@ def main():
     # to short_picks.jsonl — positions opened into a broad rally are systematically losers.
     regime_gate_on = bool(CFG.get("regime_gate", False))
     regime_gate_thresh = float(CFG.get("regime_gate_threshold_pct", 0.75))
+    regime_gate_floor = float(CFG.get("regime_gate_floor_pct", -1.5))
     regime_blocked = (regime_gate_on
                       and btc_2h_roc is not None
-                      and btc_2h_roc > regime_gate_thresh)
+                      and (btc_2h_roc > regime_gate_thresh or btc_2h_roc < regime_gate_floor))
 
     out = {
         "generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -649,7 +650,9 @@ def main():
     OUT_FILE.write_text(json.dumps(out, indent=2))
 
     if regime_blocked:
-        print(f"[regime-gate] BTC 2h ROC={btc_2h_roc:+.2f}% > {regime_gate_thresh:+.2f}% threshold — "
+        reason = (f"> {regime_gate_thresh:+.2f}% ceiling" if btc_2h_roc > regime_gate_thresh
+                  else f"< {regime_gate_floor:+.2f}% floor (BTC dumping)")
+        print(f"[regime-gate] BTC 2h ROC={btc_2h_roc:+.2f}% {reason} — "
               f"suppressing {out['count_short']} short pick(s); ranking written, no picks logged.")
 
     # Snapshot the proposed shorts (flagged) with their entry price, so we can later

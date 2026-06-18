@@ -98,6 +98,7 @@
     "max_avg_bar_pct": 2.5,
     "regime_gate": true,
     "regime_gate_threshold_pct": 0.75,
+    "regime_gate_floor_pct": -1.5,
     "rvol_floor": 0.5,
     "shadow_enabled": true,
     "shadow_weights": {"1h": 0.10, "2h": 0.15, "4h": 0.50, "recent": 0.08},
