@@ -94,7 +94,7 @@
     "capitulation_bar_pct": 6.0,
     "regime_coins": ["BTC", "ETH", "HYPE", "ZEC"],
     "picks_keep": 20000,
-    "coin_blacklist": ["XMR", "VELVET", "COAI", "STG", "APT"],
+    "coin_blacklist": ["XMR", "VELVET", "COAI", "STG", "APT", "HIGH", "RAVE"],
     "max_avg_bar_pct": 2.5,
     "regime_gate": true,
     "regime_gate_threshold_pct": 0.75,
