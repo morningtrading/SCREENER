@@ -1068,12 +1068,13 @@ def _regime_banner(regime) -> str:
             f'{header}{"".join(lines)}</div>')
 
 
-def _regime_gate_banner(data: dict) -> str:
-    """Show regime gate status: current BTC 2h ROC, floor/ceiling thresholds, and whether blocked."""
+def _regime_gate_banner(data: dict, context_only: bool = False) -> str:
+    """Show regime gate status: current BTC 2h ROC, floor/ceiling thresholds, and whether blocked.
+    context_only=True shows BTC 2h ROC read-only even when no gate is configured (e.g. longs page)."""
     cfg = data.get("config", {})
-    if not cfg.get("regime_gate"):
+    gate_on = bool(cfg.get("regime_gate"))
+    if not gate_on and not context_only:
         return ""
-    regime_blocked = data.get("regime_blocked", False)
     thresh = cfg.get("regime_gate_threshold_pct", 0.75)
     floor = cfg.get("regime_gate_floor_pct", -1.5)
     btc_rg = data.get("regime", {}).get("BTC", {})
@@ -1081,21 +1082,30 @@ def _regime_gate_banner(data: dict) -> str:
 
     if btc_2h is None:
         roc_html = '<span style="color:#7d8499">BTC 2h ROC: n/a</span>'
-        status_cls, status_txt = "mixed", "GATE: no data"
-    elif regime_blocked:
+        status_cls, status_txt = "mixed", "no data"
+    elif context_only and not gate_on:
+        color = "#3fe08a" if btc_2h >= 0 else "#ff7a93" if btc_2h < floor else "#bdfdff"
+        roc_html = f'<span style="color:{color};font-weight:700">BTC 2h ROC: {btc_2h:+.2f}%</span>'
+        if btc_2h < floor:
+            status_cls, status_txt = "down", f"BTC dumping — short gate would fire (floor {floor:+.2f}%)"
+        elif btc_2h > thresh:
+            status_cls, status_txt = "down", f"BTC pumping — short gate would fire (ceiling {thresh:+.2f}%)"
+        else:
+            status_cls, status_txt = "mixed", f"short gate range: {floor:+.2f}% / {thresh:+.2f}% &middot; context only"
+    elif data.get("regime_blocked", False):
         roc_html = f'<span style="color:#ff7a93;font-weight:700">BTC 2h ROC: {btc_2h:+.2f}%</span>'
         reason = f"above ceiling ({thresh:+.2f}%)" if btc_2h > thresh else f"below floor ({floor:+.2f}%)"
         status_cls, status_txt = "down", f"&#128683; GATE ACTIVE — {reason} — picks suppressed"
     else:
         color = "#3fe08a" if btc_2h >= 0 else "#bdfdff"
         roc_html = f'<span style="color:{color};font-weight:700">BTC 2h ROC: {btc_2h:+.2f}%</span>'
-        pct_to_ceil = thresh - btc_2h
-        pct_to_floor = btc_2h - floor
-        margin = min(pct_to_ceil, pct_to_floor)
+        margin = min(thresh - btc_2h, btc_2h - floor)
         status_cls, status_txt = "up", f"&#9989; Gate open &middot; {margin:.2f}% margin to nearest threshold"
 
+    label = "Short regime gate" if gate_on else "BTC regime"
+    thresholds = f"floor {floor:+.2f}% / ceiling {thresh:+.2f}%"
     return (f'<div class="regimebox" style="margin-bottom:8px">'
-            f'<div class="regimecap">Short regime gate &middot; floor {floor:+.2f}% / ceiling {thresh:+.2f}%</div>'
+            f'<div class="regimecap">{label} &middot; {thresholds}</div>'
             f'<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">'
             f'{roc_html}'
             f'<span class="btcregime {status_cls}" style="font-size:12px;padding:2px 12px">{status_txt}</span>'
@@ -1196,6 +1206,7 @@ async def momentum_page(request: Request):
 {auth_status_html(request)}
 <h2>Momentum — strongest coins in a real uptrend</h2>
 {_regime_banner(data.get("regime"))}
+{_regime_gate_banner(data, context_only=True)}
 <div class="searchbar">
   <span class="sicon">&#128269;</span>
   <input id="momentumsearch" type="search" placeholder="Search coin, rank or value…" autocomplete="off" autofocus>
