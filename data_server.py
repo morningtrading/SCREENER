@@ -1068,6 +1068,40 @@ def _regime_banner(regime) -> str:
             f'{header}{"".join(lines)}</div>')
 
 
+def _regime_gate_banner(data: dict) -> str:
+    """Show regime gate status: current BTC 2h ROC, floor/ceiling thresholds, and whether blocked."""
+    cfg = data.get("config", {})
+    if not cfg.get("regime_gate"):
+        return ""
+    regime_blocked = data.get("regime_blocked", False)
+    thresh = cfg.get("regime_gate_threshold_pct", 0.75)
+    floor = cfg.get("regime_gate_floor_pct", -1.5)
+    btc_rg = data.get("regime", {}).get("BTC", {})
+    btc_2h = btc_rg.get("2h")
+
+    if btc_2h is None:
+        roc_html = '<span style="color:#7d8499">BTC 2h ROC: n/a</span>'
+        status_cls, status_txt = "mixed", "GATE: no data"
+    elif regime_blocked:
+        roc_html = f'<span style="color:#ff7a93;font-weight:700">BTC 2h ROC: {btc_2h:+.2f}%</span>'
+        reason = f"above ceiling ({thresh:+.2f}%)" if btc_2h > thresh else f"below floor ({floor:+.2f}%)"
+        status_cls, status_txt = "down", f"&#128683; GATE ACTIVE — {reason} — picks suppressed"
+    else:
+        color = "#3fe08a" if btc_2h >= 0 else "#bdfdff"
+        roc_html = f'<span style="color:{color};font-weight:700">BTC 2h ROC: {btc_2h:+.2f}%</span>'
+        pct_to_ceil = thresh - btc_2h
+        pct_to_floor = btc_2h - floor
+        margin = min(pct_to_ceil, pct_to_floor)
+        status_cls, status_txt = "up", f"&#9989; Gate open &middot; {margin:.2f}% margin to nearest threshold"
+
+    return (f'<div class="regimebox" style="margin-bottom:8px">'
+            f'<div class="regimecap">Short regime gate &middot; floor {floor:+.2f}% / ceiling {thresh:+.2f}%</div>'
+            f'<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">'
+            f'{roc_html}'
+            f'<span class="btcregime {status_cls}" style="font-size:12px;padding:2px 12px">{status_txt}</span>'
+            f'</div></div>')
+
+
 def _gen_epoch(iso) -> Optional[float]:
     """Parse a 'YYYY-MM-DDThh:mm:ssZ' UTC string to an epoch (seconds); None if unparseable."""
     try:
@@ -1351,6 +1385,7 @@ async def shorts_page(request: Request):
 {auth_status_html(request)}
 <h2>Top perps to short — weak, liquid, low reversal risk</h2>
 {_regime_banner(data.get("regime"))}
+{_regime_gate_banner(data)}
 <label class="risktoggle"><input type="checkbox" id="hiderisk"> &#9888; Hide high reversal-risk (show only cleaner shorts)</label>
 <div class="searchbar">
   <span class="sicon">&#128269;</span>
